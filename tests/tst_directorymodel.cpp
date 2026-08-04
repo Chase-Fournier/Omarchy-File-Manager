@@ -127,22 +127,32 @@ void TestDirectoryModel::filterNarrowsAndReportsMatchPositions()
     QVERIFY(waitForIdle(&model));
 
     model.setFilter(QStringLiteral("me"));
-    // Matches "theme.cpp" and "README.md" — case-insensitively, in sorted order.
-    QCOMPARE(namesOf(model),
-             QStringList({ QStringLiteral("README.md"), QStringLiteral("theme.cpp") }));
+    // Fuzzy, so all three match — o[m]afil[e].pro included. What matters is the ranking:
+    // the two with an adjacent "me" beat the one where the letters are far apart.
+    QCOMPARE(model.count(), 3);
+    QCOMPARE(namesOf(model).last(), QStringLiteral("omafile.pro"));
 
-    // The match position is what lets the delegate bold the matched run:
-    // "the[me].cpp" starts at 3, "READ[ME].md" at 4 — matched case-insensitively.
-    QCOMPARE(model.data(model.index(1), DirectoryModel::MatchStartRole).toInt(), 3);
-    QCOMPARE(model.data(model.index(1), DirectoryModel::MatchLengthRole).toInt(), 2);
-    QCOMPARE(model.data(model.index(0), DirectoryModel::MatchStartRole).toInt(), 4);
+    // The matched character positions are what let the delegate bold them.
+    const int themeRow = indexOfName(model, QStringLiteral("theme.cpp"));
+    const QVariantList themeHits =
+        model.data(model.index(themeRow), DirectoryModel::MatchPositionsRole).toList();
+    QCOMPARE(themeHits, QVariantList({ 3, 4 })); // the[me].cpp
+
+    const int readmeRow = indexOfName(model, QStringLiteral("README.md"));
+    const QVariantList readmeHits =
+        model.data(model.index(readmeRow), DirectoryModel::MatchPositionsRole).toList();
+    QCOMPARE(readmeHits, QVariantList({ 4, 5 })); // READ[ME].md
 
     // Filtering selects the first surviving row so Enter is immediately useful.
     QCOMPARE(model.currentIndex(), 0);
 
+    // Fuzzy, not substring: non-adjacent characters match too.
+    model.setFilter(QStringLiteral("tcp"));
+    QCOMPARE(namesOf(model), QStringList({ QStringLiteral("theme.cpp") }));
+
     model.setFilter(QString());
     QCOMPARE(model.count(), 3);
-    QCOMPARE(model.data(model.index(0), DirectoryModel::MatchStartRole).toInt(), -1);
+    QVERIFY(model.data(model.index(0), DirectoryModel::MatchPositionsRole).toList().isEmpty());
 }
 
 // The whole point of the two-pass design: a listing costs no stat calls, and size/time
@@ -369,8 +379,12 @@ void TestDirectoryModel::filteringAKeystrokeIsWithinBudget()
     model.setFilter(QStringLiteral("entry-042"));
     const qint64 elapsed = timer.elapsed();
 
-    // entry-042 is a prefix of entry-04200 through entry-04299.
-    QCOMPARE(model.count(), 100);
+    // Fuzzy matching is broader than a prefix scan, so the exact count is a property of
+    // the scorer, not of this test; what this test guards is the §12 latency budget.
+    QVERIFY(model.count() > 0);
+    QVERIFY(model.count() < 10000);
+    // The best match must still be an exact prefix hit.
+    QVERIFY(namesOf(model).first().startsWith(QStringLiteral("entry-042")));
     qInfo("filtered 10k entries in %lldms (budget 5ms)", static_cast<long long>(elapsed));
     QVERIFY2(elapsed < 5, qPrintable(QStringLiteral("took %1ms").arg(elapsed)));
 }

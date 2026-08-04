@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Build and run the test suite, then check the startup budget from §12 of the plan.
+# Build, check the §12 startup budget, then run the test suite.
 
 set -e
 
@@ -14,39 +14,47 @@ cd "$(dirname "$0")/.."
   make -j"$(nproc)"
 )
 
+# Startup is measured *before* the suite, not after. The search budget test writes and
+# then deletes a 100k-file tree, and measuring cold start while the kernel is still
+# working through that produced a phantom 60 ms regression and 600 ms outliers.
+measure_startup() {
+  local budget_ms=120
+  local samples=()
+  local reading
+
+  if [[ -z $WAYLAND_DISPLAY && -z $DISPLAY ]]; then
+    echo "SKIP  : startup budget (no display)"
+    return 0
+  fi
+
+  for _ in {1..11}; do
+    reading=$(OMAFILE_TRACE_STARTUP=quit timeout 20 ./build/omafile 2>/dev/null | awk '/^startup_ms/ {print $2}')
+    [[ -n $reading ]] && samples+=("$reading")
+    sleep 0.5
+  done
+
+  if (( ${#samples[@]} == 0 )); then
+    echo "FAIL  : startup budget (no samples collected)"
+    return 1
+  fi
+
+  # Compare the median, not the worst case: window creation contends with the
+  # compositor, and one stalled frame should not fail the suite.
+  local sorted median
+  sorted=$(printf '%s\n' "${samples[@]}" | sort -n)
+  median=$(printf '%s\n' "$sorted" | awk '{ a[NR] = $1 } END { print a[int((NR + 1) / 2)] }')
+
+  echo "startup: median ${median}ms over ${#samples[@]} runs (budget ${budget_ms}ms) [$(echo $sorted | tr '\n' ' ')]"
+
+  if (( median > budget_ms )); then
+    echo "FAIL  : startup budget exceeded"
+    return 1
+  fi
+  echo "PASS  : startup budget"
+}
+
+startup_status=0
+measure_startup || startup_status=1
+
 QT_QPA_PLATFORM=offscreen ./build/tests/tst_omafile
-
-# Cold start to first paint must stay under 120 ms. Needs a real compositor, so it is
-# skipped rather than failed when there is no display to paint into.
-if [[ -z $WAYLAND_DISPLAY && -z $DISPLAY ]]; then
-  echo "SKIP  : startup budget (no display)"
-  exit 0
-fi
-
-budget_ms=120
-samples=()
-
-for _ in {1..7}; do
-  reading=$(OMAFILE_TRACE_STARTUP=quit timeout 20 ./build/omafile 2>/dev/null | awk '/^startup_ms/ {print $2}')
-  [[ -n $reading ]] && samples+=("$reading")
-  sleep 0.5
-done
-
-if (( ${#samples[@]} == 0 )); then
-  echo "FAIL  : startup budget (no samples collected)"
-  exit 1
-fi
-
-# Compare the median, not the worst case: window creation contends with the
-# compositor, and one stalled frame should not fail the suite.
-sorted=$(printf '%s\n' "${samples[@]}" | sort -n)
-median=$(printf '%s\n' "$sorted" | awk '{ a[NR] = $1 } END { print a[int((NR + 1) / 2)] }')
-
-echo "startup: median ${median}ms over ${#samples[@]} runs (budget ${budget_ms}ms) [$(echo $sorted | tr '\n' ' ')]"
-
-if (( median > budget_ms )); then
-  echo "FAIL  : startup budget exceeded"
-  exit 1
-fi
-
-echo "PASS  : startup budget"
+exit $startup_status

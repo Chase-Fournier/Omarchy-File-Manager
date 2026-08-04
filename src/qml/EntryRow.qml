@@ -16,8 +16,7 @@ Item {
     required property bool isSelected
     required property string sizeText
     required property string timeText
-    required property int matchStart
-    required property int matchLength
+    required property var matchPositions
 
     readonly property bool current: index === Dir.currentIndex
     readonly property bool renaming: app.renamingRow === index
@@ -127,9 +126,9 @@ Item {
 
         // Plain text unless there is a match to highlight — StyledText parses markup per
         // row, and an unfiltered list can be 100k rows.
-        textFormat: row.matchStart >= 0 ? Text.StyledText : Text.PlainText
-        text: row.matchStart >= 0
-              ? app.highlight(row.name, row.matchStart, row.matchLength, Theme.accent)
+        textFormat: row.matchPositions.length > 0 ? Text.StyledText : Text.PlainText
+        text: row.matchPositions.length > 0
+              ? app.highlight(row.name, row.matchPositions, Theme.accent)
               : row.name
     }
 

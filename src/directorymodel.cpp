@@ -1,6 +1,7 @@
 #include "directorymodel.h"
 
 #include "formatting.h"
+#include "fuzzyscorer.h"
 #include "lister.h"
 #include "opener.h"
 #include "watcher.h"
@@ -135,8 +136,7 @@ QHash<int, QByteArray> DirectoryModel::roleNames() const
         { IsSelectedRole, "isSelected" },
         { SizeTextRole, "sizeText" },
         { TimeTextRole, "timeText" },
-        { MatchStartRole, "matchStart" },
-        { MatchLengthRole, "matchLength" },
+        { MatchPositionsRole, "matchPositions" },
     };
 }
 
@@ -170,10 +170,13 @@ QVariant DirectoryModel::data(const QModelIndex &index, int role) const
         if (!entry.statted)
             return QString();
         return Formatting::relativeTime(entry.mtime, QDateTime::currentSecsSinceEpoch());
-    case MatchStartRole:
-        return row.matchStart;
-    case MatchLengthRole:
-        return row.matchLength;
+    case MatchPositionsRole: {
+        QVariantList positions;
+        positions.reserve(row.positions.size());
+        for (int position : row.positions)
+            positions.append(position);
+        return positions;
+    }
     default:
         return {};
     }
@@ -277,7 +280,7 @@ void DirectoryModel::onFinished(quint64 generation, int)
               [this](const Entry &a, const Entry &b) { return lessThan(a, b); });
     rebuildIndex();
 
-    if (m_diffPending)
+    if (m_diffPending && m_filter.isEmpty())
         applyRows(buildRows());
     else
         resetRows();
@@ -420,16 +423,28 @@ QList<DirectoryModel::Row> DirectoryModel::buildRows() const
         row.entry = entry;
 
         if (!m_filter.isEmpty()) {
-            // M1 filtering is a plain case-insensitive substring match. M3 replaces this
-            // with FuzzyScorer, which is why the match position is already a role.
-            const int at = entry.name.indexOf(m_filter, 0, Qt::CaseInsensitive);
-            if (at < 0)
+            // Tier 1 of §6: fuzzy, in memory, no syscalls at all.
+            const FuzzyScorer::Result match = FuzzyScorer::score(m_filter, entry.name);
+            if (!match.matched)
                 continue;
-            row.matchStart = at;
-            row.matchLength = m_filter.size();
+            row.positions = match.positions;
+            row.score = match.score;
         }
 
         rows.append(std::move(row));
+    }
+
+    // With a filter active the list is a ranking, not a directory listing: best match
+    // first, exactly like the launcher. Directories keep their priority only as a
+    // tiebreak between equally good matches.
+    if (!m_filter.isEmpty()) {
+        std::stable_sort(rows.begin(), rows.end(), [](const Row &a, const Row &b) {
+            if (a.score != b.score)
+                return a.score > b.score;
+            if (a.entry.isDir() != b.entry.isDir())
+                return a.entry.isDir();
+            return false;
+        });
     }
 
     return rows;
@@ -474,8 +489,7 @@ void DirectoryModel::applyRows(const QList<Row> &target)
                 || existing.entry.mtime != fresh.entry.mtime
                 || existing.entry.type != fresh.entry.type
                 || existing.entry.linkTarget != fresh.entry.linkTarget
-                || existing.matchStart != fresh.matchStart
-                || existing.matchLength != fresh.matchLength) {
+                || existing.positions != fresh.positions) {
                 m_rows[i] = fresh;
                 const QModelIndex changed = index(i);
                 emit dataChanged(changed, changed);

@@ -49,6 +49,9 @@ Item {
         { keys: ["Ctrl+Z"],           label: "Undo",                 action: () => Ops.undo() },
         { keys: ["Ctrl+Shift+N"],     label: "New folder",           action: () => app.promptNewFolder() },
 
+        { keys: ["Ctrl+F"],           label: "Find in this tree",    action: () => app.beginFind() },
+        { keys: ["Ctrl+Alt+F"],       label: "Search file contents", action: () => app.beginContentFind() },
+
         { keys: ["Ctrl+T"],           label: "Terminal here",        action: () => app.openTerminal() },
         { keys: ["Ctrl+L"],           label: "Edit path",            action: () => app.beginPathEdit() },
         { keys: ["Ctrl+H"],           label: "Toggle hidden files",  action: () => app.toggleHidden() },

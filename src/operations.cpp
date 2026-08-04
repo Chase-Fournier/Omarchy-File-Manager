@@ -1,6 +1,7 @@
 #include "operations.h"
 
 #include "clipboard.h"
+#include "opener.h"
 
 #include <QClipboard>
 #include <QDir>
@@ -277,6 +278,22 @@ void Operations::cancel()
     }
 }
 
+// $TERMINAL if it is set and real, otherwise the first of the usual suspects present.
+static QString findTerminal()
+{
+    QString terminal = QString::fromLocal8Bit(qgetenv("TERMINAL"));
+    if (!terminal.isEmpty() && !QStandardPaths::findExecutable(terminal).isEmpty())
+        return terminal;
+
+    for (const QString &fallback : { QStringLiteral("alacritty"), QStringLiteral("ghostty"),
+                                     QStringLiteral("kitty"), QStringLiteral("foot"),
+                                     QStringLiteral("xterm") }) {
+        if (!QStandardPaths::findExecutable(fallback).isEmpty())
+            return fallback;
+    }
+    return QString();
+}
+
 void Operations::openTerminal(const QString &directory)
 {
     // Omarchy's own launcher first, so omafile opens whatever the desktop is configured
@@ -296,17 +313,7 @@ void Operations::openTerminal(const QString &directory)
         }
     }
 
-    QString terminal = QString::fromLocal8Bit(qgetenv("TERMINAL"));
-    if (terminal.isEmpty() || QStandardPaths::findExecutable(terminal).isEmpty()) {
-        for (const QString &fallback : { QStringLiteral("alacritty"), QStringLiteral("ghostty"),
-                                         QStringLiteral("kitty"), QStringLiteral("foot"),
-                                         QStringLiteral("xterm") }) {
-            if (!QStandardPaths::findExecutable(fallback).isEmpty()) {
-                terminal = fallback;
-                break;
-            }
-        }
-    }
+    const QString terminal = findTerminal();
     if (terminal.isEmpty()) {
         setStatus(QStringLiteral("no terminal found"));
         return;
@@ -315,6 +322,24 @@ void Operations::openTerminal(const QString &directory)
     QProcess process;
     process.setWorkingDirectory(directory);
     process.setProgram(terminal);
+    process.startDetached();
+}
+
+void Operations::openAtLine(const QString &path, int line)
+{
+    const QString editor = QString::fromLocal8Bit(qgetenv("EDITOR"));
+    const QString terminal = findTerminal();
+    if (line <= 0 || editor.isEmpty() || terminal.isEmpty()) {
+        Opener::open(path);
+        return;
+    }
+
+    // "+N" is understood by vi, vim, nvim, helix and emacs alike.
+    QProcess process;
+    process.setProgram(terminal);
+    process.setArguments({ QStringLiteral("-e"), editor,
+                           QStringLiteral("+%1").arg(line), path });
+    process.setWorkingDirectory(QFileInfo(path).absolutePath());
     process.startDetached();
 }
 

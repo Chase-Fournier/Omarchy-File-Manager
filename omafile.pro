@@ -19,10 +19,13 @@ SOURCES += \
     src/directorymodel.cpp \
     src/fileops.cpp \
     src/formatting.cpp \
+    src/fuzzyscorer.cpp \
     src/journal.cpp \
     src/lister.cpp \
     src/location.cpp \
     src/opener.cpp \
+    src/searchengine.cpp \
+    src/searchmodel.cpp \
     src/operations.cpp \
     src/theme.cpp \
     src/trash.cpp \
@@ -34,10 +37,13 @@ HEADERS += \
     src/entry.h \
     src/fileops.h \
     src/formatting.h \
+    src/fuzzyscorer.h \
     src/journal.h \
     src/lister.h \
     src/location.h \
     src/opener.h \
+    src/searchengine.h \
+    src/searchmodel.h \
     src/operations.h \
     src/theme.h \
     src/trash.h \

@@ -63,13 +63,20 @@ Multi-select, copy/cut/paste (Super and Ctrl), drag and drop both directions, XD
 undo, new folder, inline rename, terminal-here, copy path, conflict resolution, progress
 line. **91 tests pass.**
 
+### M3 — Find ✅
+All three tiers of §6: fuzzy in-directory filter, `Ctrl+F` recursive name search over
+`fd` with streaming and a warm cache, `Ctrl+Alt+F` content search over ripgrep with line
+numbers and previews. **134 tests pass.**
+
 **Measured against §12:**
 
 | Budget | Target | Actual |
 |---|---|---|
 | Cold start to first paint | < 120 ms | **112 ms** median (7 runs) |
 | 10k-entry directory, complete | < 150 ms | **7 ms** |
-| Keystroke → filtered list | < 5 ms | **0 ms** |
+| Keystroke → filtered list | < 5 ms | **1 ms** (fuzzy, 10k entries) |
+| First search result (§6) | < 30 ms | **3 ms** |
+| 100k-file tree walked (§6) | < 400 ms | **61 ms** |
 | RSS, idle, one window | < 90 MB | **131 MB** ✗ — see below |
 
 ---
@@ -113,6 +120,51 @@ created during the initial listing would be missed by inotify forever.
 **Backspace edits the filter before it navigates up — a deviation from §5,** which assigns
 it to "parent directory" unconditionally. With bare letters typing into the filter,
 correcting a typo would otherwise throw you into the parent.
+
+### Find (M3)
+
+**The scorer is a pure `(needle, haystack) -> (score, positions)` function** with no fzf
+dependency, so ranking quality is directly testable — §14 calls it the highest-value test
+in the repo, and it caught two real ranking deficiencies during development.
+
+**Ranking is tuned by a chain of tie-breakers, in this order:** a match inside the
+basename beats one smeared across parent directories (+96, more than any arrangement of
+characters can make up); then shallower paths; then shorter names. The two failures worth
+recording:
+- *Exactness.* Without a length penalty, `main.cpp` and `main.cpp.bak` score identically
+  for the query `main.cpp`, because both match consecutively from position 0.
+- *That penalty then swamped everything else.* Uncapped, it made a long well-structured
+  name (`DirectoryModel.cpp`, matching `dm` on a camelCase boundary) lose to a short mushy
+  one (`downmix.cpp`). It is capped at 8 so length only ever breaks a near-tie.
+
+**Smart case:** an all-lowercase needle matches case-insensitively; any uppercase
+character makes the whole match case-sensitive.
+
+**`fd --print0`, not newline-delimited output.** §14 names a filename containing a newline
+as the classic breakage for anything that shells out, and search is the *only* place
+omafile does. Covered by a test that plants such a file and requires it back.
+
+**The warm cache is what makes the second search instant** (§6): a completed walk is kept
+as a path list and re-ranked in memory with no process at all — measured at 0 ms against
+4 ms for the cold walk. Only a *complete* walk is cached; a cancelled one would answer
+later queries from a truncated tree. The watcher invalidates it on any directory change.
+
+**Every keystroke cancels the walk outright and drops its results.** Same generation
+counter as the `Lister`. Results are replaced rather than appended on each flush, because
+ranking is global — a path found late can outrank everything already on screen.
+
+**Search construction is deferred until the first search** (§12). Building the engine and
+its thread eagerly is a cost every window pays for a feature most never use.
+
+**`bin/test` measures startup *before* running the suite.** The 100k-file search budget
+test writes and then deletes that tree, and measuring cold start while the kernel worked
+through it produced a phantom 60 ms regression with 600 ms outliers. Ordering fixed it;
+more samples alone did not.
+
+**A filtered list is a ranking, not a listing.** With a filter active, rows are ordered by
+score and directories keep priority only as a tiebreak. That breaks the watcher's
+merge-walk invariant (which assumes both lists share the sort comparator), so a
+watcher-triggered rebuild resets instead of diffing while a filter is active.
 
 ### Act (M2)
 
@@ -265,6 +317,17 @@ the files when there is only one.
 
 **No bulk rename yet** (§9's vimv approach) — that is M5, along with the `Ctrl+?` overlay
 that will be generated from `Shortcuts.qml`'s table.
+
+**Find-mode UI is verified only headlessly.** `Ctrl+F` was confirmed on screen (ranked
+results, bolded matches, "27 results · of 382 scanned"), but `Ctrl+Alt+F` never landed
+through `hyprctl sendshortcut`, so content search is proven by its tests and not by use.
+Worth driving by hand.
+
+**The MRU recency boost from §6 is not implemented.** Scoring has no notion of recently
+opened paths yet.
+
+**`plocate` whole-filesystem search is written but untested** — the `/`-prefixed query
+path has no coverage and plocate is not installed here.
 
 **Sort bindings are not in the plan's §5 table.** Either add `Ctrl+1/2/3` to it or pick
 different keys.

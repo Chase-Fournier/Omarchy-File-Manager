@@ -62,6 +62,52 @@ Window {
     function extendSelection(delta) { Dir.extendSelection(delta) }
     function openTerminal() { Ops.openTerminal(Dir.path) }
 
+    // ── Find (§6 tiers 2 and 3) ──────────────────────────────────────
+    readonly property bool searching: Find.active
+
+    function beginFind() {
+        if (!Find.nameSearchAvailable) {
+            Ops.copyPathToClipboard([])   // no-op; status line explains instead
+            return
+        }
+        Dir.filter = ""
+        Find.begin(Dir.path, 0)
+    }
+
+    function beginContentFind() {
+        if (!Find.contentSearchAvailable)
+            return
+        Dir.filter = ""
+        Find.begin(Dir.path, 1)
+    }
+
+    function endFind() { Find.end() }
+
+    function activateSearchResult(index) {
+        const target = Find.rowPath(index)
+        if (target.length === 0)
+            return
+
+        if (Find.mode === 1) {
+            // A content hit opens at its line; the search stays open so the next hit is
+            // one keystroke away.
+            Ops.openAtLine(target, Find.rowLine(index))
+            return
+        }
+
+        if (Find.rowIsDir(index)) {
+            Find.end()
+            Dir.navigate(target)
+            return
+        }
+
+        // A file: go to where it lives and put the cursor on it, rather than opening it
+        // blind — finding something is usually the prelude to acting on it.
+        Find.end()
+        Dir.navigate(target.substring(0, target.lastIndexOf("/")))
+        Dir.selectByName(target.substring(target.lastIndexOf("/") + 1))
+    }
+
     function copy() { Ops.copyToClipboard(Dir.actionPaths()) }
     function cut() { Ops.cut(Dir.actionPaths()) }
     function paste() { Ops.paste(Dir.path) }
@@ -153,17 +199,38 @@ Window {
             Dir.sortMode = mode
     }
 
-    // Wraps the matched run in the accent color. Escaped by hand because the text is a
+    // Bolds exactly the characters the scorer matched — which are scattered, not a
+    // single run, now that the filter is fuzzy. Escaped by hand because the text is a
     // filename and StyledText would otherwise treat "&" or "<" as markup.
-    function highlight(name, start, length, color) {
+    function highlight(name, positions, color) {
         function escapeMarkup(text) {
             return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
         }
-        return escapeMarkup(name.substring(0, start))
-             + '<font color="' + color + '"><b>'
-             + escapeMarkup(name.substr(start, length))
-             + '</b></font>'
-             + escapeMarkup(name.substring(start + length))
+
+        const marked = {}
+        for (let i = 0; i < positions.length; ++i)
+            marked[positions[i]] = true
+
+        // Adjacent matches are wrapped as one span rather than one per character, which
+        // keeps the markup short on long names.
+        let out = ""
+        let run = ""
+        let inRun = false
+        for (let c = 0; c <= name.length; ++c) {
+            const hit = c < name.length && marked[c] === true
+            if (hit !== inRun || c === name.length) {
+                if (run.length > 0) {
+                    out += inRun
+                        ? '<font color="' + color + '"><b>' + escapeMarkup(run) + '</b></font>'
+                        : escapeMarkup(run)
+                }
+                run = ""
+                inRun = hit
+            }
+            if (c < name.length)
+                run += name[c]
+        }
+        return out
     }
 
     function beginPathEdit() {
@@ -225,7 +292,9 @@ Window {
     // Escape unwinds one layer at a time: filter, then selection, then the window (§5).
     // Not named `escape`: that is a JavaScript global and QML rejects it as a method.
     function escapePressed() {
-        if (Ops.busy)
+        if (Find.active)
+            endFind()
+        else if (Ops.busy)
             Ops.cancel()
         else if (Dir.filter.length > 0)
             Dir.filter = ""
@@ -310,6 +379,14 @@ Window {
     }
 
     Connections {
+        target: Dir
+        // §6: the warm cache is invalidated by the watcher, or a search would keep
+        // answering from a tree that no longer exists.
+        function onCountsChanged() { Find.invalidateCache() }
+        function onLocationChanged() { Find.invalidateCache() }
+    }
+
+    Connections {
         target: Ops
         // Refresh is cheap and the watcher may not have fired yet; selecting what was
         // just created is what makes "new folder then type a name" flow.
@@ -341,10 +418,12 @@ Window {
             }
 
             if (event.key === Qt.Key_Backspace) {
-                // Backspace edits the filter while one is being typed and only walks up
+                // Backspace edits the query while one is being typed and only walks up
                 // when there is nothing left to delete — otherwise typing a filter and
                 // correcting a typo would throw you into the parent directory.
-                if (Dir.filter.length > 0)
+                if (Find.active)
+                    Find.query = Find.query.slice(0, -1)
+                else if (Dir.filter.length > 0)
                     Dir.filter = Dir.filter.slice(0, -1)
                 else
                     root.goUp()
@@ -357,7 +436,12 @@ Window {
                 && event.text.charCodeAt(0) > 0x20
                 && !(event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier))
             if (plainText) {
-                Dir.filter += event.text
+                // Same key, two destinations: the recursive query while a search is open,
+                // the in-directory filter otherwise.
+                if (Find.active)
+                    Find.query += event.text
+                else
+                    Dir.filter += event.text
                 event.accepted = true
             }
         }
@@ -432,18 +516,27 @@ Window {
             }
 
             // ── Filter line: absent entirely until something is typed ─────
+            // One line serves both the in-directory filter and the recursive search;
+            // the glyph is what says which is running.
             Text {
                 id: filterLine
 
                 anchors.top: header.bottom
                 anchors.left: parent.left
+                anchors.right: parent.right
                 height: visible ? root.rowHeight : 0
-                visible: Dir.filter.length > 0
+                visible: Dir.filter.length > 0 || Find.active
                 verticalAlignment: Text.AlignVCenter
-                text: "  " + Dir.filter
+                elide: Text.ElideRight
                 color: Theme.accent
                 font.family: root.monoFamily
                 font.pixelSize: root.fontSize
+                text: {
+                    if (!Find.active)
+                        return "  " + Dir.filter
+                    const glyph = Find.mode === 1 ? "  " : "  "
+                    return glyph + Find.query + (Find.busy ? " …" : "")
+                }
             }
 
             // ── List ──────────────────────────────────────────────────────
@@ -461,7 +554,7 @@ Window {
                 // Selection is driven by the model, not by the view's own key handling.
                 keyNavigationEnabled: false
                 boundsBehavior: Flickable.StopAtBounds
-                currentIndex: Dir.currentIndex
+                currentIndex: Find.active ? Find.currentIndex : Dir.currentIndex
                 cacheBuffer: root.rowHeight * 20
 
                 // Only visible rows get stat'd (§12); this is what reports the window.
@@ -480,16 +573,38 @@ Window {
                     target: Dir
                     function onCountsChanged() { list.reportVisible() }
                     function onCurrentIndexChanged() {
-                        if (Dir.currentIndex >= 0)
+                        if (!Find.active && Dir.currentIndex >= 0)
                             list.positionViewAtIndex(Dir.currentIndex, ListView.Contain)
                     }
                 }
 
-                model: Dir
+                Connections {
+                    target: Find
+                    function onCurrentIndexChanged() {
+                        if (Find.active && Find.currentIndex >= 0)
+                            list.positionViewAtIndex(Find.currentIndex, ListView.Contain)
+                    }
+                }
 
-                delegate: EntryRow {
-                    app: root
-                    width: ListView.view.width
+                model: Find.active ? Find : Dir
+                delegate: Find.active ? searchDelegate : entryDelegate
+
+                Component {
+                    id: entryDelegate
+
+                    EntryRow {
+                        app: root
+                        width: ListView.view.width
+                    }
+                }
+
+                Component {
+                    id: searchDelegate
+
+                    SearchRow {
+                        app: root
+                        width: ListView.view.width
+                    }
                 }
 
             }
@@ -636,6 +751,12 @@ Window {
                                  ? "… " + Ops.progressName : "working…"
                         if (Ops.status.length > 0)
                             return Ops.status
+                        if (Find.active) {
+                            let found = [Find.count + (Find.count === 1 ? " result" : " results")]
+                            if (Find.scanned > 0)
+                                found.push("of " + Find.scanned + " scanned")
+                            return found.join(" · ")
+                        }
 
                         let parts = [Dir.count + (Dir.count === 1 ? " item" : " items")]
                         if (Dir.filter.length > 0)

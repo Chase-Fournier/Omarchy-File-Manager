@@ -65,6 +65,9 @@ public:
     Q_INVOKABLE void resolveConflict(int choice, bool applyToAll);
     Q_INVOKABLE void cancel();
     Q_INVOKABLE void openTerminal(const QString &directory);
+    // A content-search hit: $EDITOR at that line, in a terminal. Falls back to xdg-open
+    // when there is no editor or no line to jump to.
+    Q_INVOKABLE void openAtLine(const QString &path, int line);
 
     // True when moving these paths into this directory would stay on one filesystem,
     // which is what makes move the sensible default for a drop (§7).

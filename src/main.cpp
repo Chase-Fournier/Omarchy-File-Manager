@@ -1,5 +1,6 @@
 #include "directorymodel.h"
 #include "operations.h"
+#include "searchmodel.h"
 #include "location.h"
 #include "theme.h"
 
@@ -94,11 +95,13 @@ int main(int argc, char *argv[])
     Theme theme;
     DirectoryModel model;
     Operations operations;
+    SearchModel search;
 
     QQmlApplicationEngine engine;
     qmlRegisterSingletonInstance("Omafile", 1, 0, "Theme", &theme);
     qmlRegisterSingletonInstance("Omafile", 1, 0, "Dir", &model);
     qmlRegisterSingletonInstance("Omafile", 1, 0, "Ops", &operations);
+    qmlRegisterSingletonInstance("Omafile", 1, 0, "Find", &search);
     // Registered only so QML can name the sort enum; the instance above is the model.
     qmlRegisterUncreatableType<DirectoryModel>("Omafile", 1, 0, "DirectoryModel",
                                                QStringLiteral("Use the Dir singleton"));

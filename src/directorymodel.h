@@ -55,8 +55,7 @@ public:
         IsSelectedRole,
         SizeTextRole,
         TimeTextRole,
-        MatchStartRole,
-        MatchLengthRole,
+        MatchPositionsRole,
     };
 
     explicit DirectoryModel(QObject *parent = nullptr);
@@ -159,8 +158,10 @@ private:
     struct Row
     {
         Entry entry;
-        int matchStart = -1;
-        int matchLength = 0;
+        // Which characters of the name the filter matched, for highlighting. Empty when
+        // no filter is active.
+        QList<int> positions;
+        int score = 0;
     };
 
     void startListing(bool diff);
