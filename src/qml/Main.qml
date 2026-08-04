@@ -62,6 +62,50 @@ Window {
     function extendSelection(delta) { Dir.extendSelection(delta) }
     function openTerminal() { Ops.openTerminal(Dir.path) }
 
+    // ── Places and remote (§10) ──────────────────────────────────────
+    property bool sidebarVisible: false
+
+    function toggleSidebar() { sidebarVisible = !sidebarVisible }
+
+    function bookmarkHere() {
+        if (Places.isBookmarked(Dir.path))
+            Places.removeBookmark(Dir.path)
+        else
+            Places.addBookmark(Dir.path)
+    }
+
+    function promptConnect() {
+        overlay.mode = "text"
+        overlay.label = "Connect to  —  ssh://host/path, smb://…, davs://…, "
+                      + "rclone:remote:path, or a host from ~/.ssh/config"
+        overlay.initialText = ""
+        overlay.offerApplyToAll = false
+        overlay.pending = "connect"
+        overlay.open()
+    }
+
+    function ejectHere() {
+        // Ejecting acts on the place the current location belongs to, so it works from
+        // inside the mount rather than only from the sidebar.
+        for (let i = 0; i < Places.count; ++i) {
+            const target = Places.data(Places.index(i, 0), 259) // TargetRole
+            if (target.length > 0 && Dir.path.startsWith(target)) {
+                Places.eject(i)
+                return
+            }
+        }
+    }
+
+    // §10.6: no dependable trash on a network mount, so Delete there is the permanent
+    // one — asked for explicitly instead of silently doing something different.
+    function trashOrConfirm() {
+        const paths = Dir.actionPaths()
+        if (paths.length > 0 && Ops.isRemote(paths[0]))
+            confirmDelete()
+        else
+            trash()
+    }
+
     // ── Find (§6 tiers 2 and 3) ──────────────────────────────────────
     readonly property bool searching: Find.active
 
@@ -379,6 +423,12 @@ Window {
     }
 
     Connections {
+        target: Places
+        function onNavigate(location) { Dir.navigate(location) }
+        function onStatus(message) { Ops.reportStatus(message) }
+    }
+
+    Connections {
         target: Dir
         // §6: the warm cache is invalidated by the watcher, or a search would keep
         // answering from a tree that no longer exists.
@@ -446,9 +496,28 @@ Window {
             }
         }
 
+        Sidebar {
+            id: sidebar
+
+            app: root
+            visible: root.sidebarVisible
+            anchors.left: parent.left
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            // The same window padding as everything else, so the sidebar's rows indent
+            // exactly like the file list's rows rather than sitting half a step further
+            // out.
+            anchors.margins: root.pad
+            width: visible ? 240 : 0
+        }
+
         Item {
             anchors.fill: parent
             anchors.margins: root.pad
+            // A full pad of breathing room between the sidebar and the list, matching the
+            // gap on the window's other three sides.
+            anchors.leftMargin: root.pad
+                                + (sidebar.visible ? sidebar.width + root.pad : 0)
 
             // ── Breadcrumb ────────────────────────────────────────────────
             Item {
@@ -802,6 +871,8 @@ Window {
         onAccepted: function (text) {
             if (pending === "newFolder")
                 Ops.newFolder(Dir.path, text)
+            else if (pending === "connect")
+                Places.connectTo(text)
         }
         onChose: function (value) {
             if (pending === "delete" && value === 1)

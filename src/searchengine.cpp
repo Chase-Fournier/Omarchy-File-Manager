@@ -1,6 +1,7 @@
 #include "searchengine.h"
 
 #include "fuzzyscorer.h"
+#include "mounts.h"
 
 #include <QElapsedTimer>
 #include <QFile>
@@ -143,15 +144,40 @@ void SearchEngine::searchNames(const QString &root, const QString &query, quint6
         return;
     }
 
-    QProcess process;
-    process.setProgram(program);
     // --print0 rather than newlines: §14 is explicit that a filename containing a newline
     // is the classic breakage for anything that shells out, and this is the only place
     // omafile does.
-    process.setArguments({ QStringLiteral("--hidden"), QStringLiteral("--no-ignore-vcs"),
-                           QStringLiteral("--color"), QStringLiteral("never"),
-                           QStringLiteral("--absolute-path"), QStringLiteral("--print0"),
-                           QStringLiteral("."), root });
+    const QStringList fdArguments = { QStringLiteral("--hidden"),
+                                      QStringLiteral("--no-ignore-vcs"),
+                                      QStringLiteral("--color"), QStringLiteral("never"),
+                                      QStringLiteral("--absolute-path"),
+                                      QStringLiteral("--print0"), QStringLiteral(".") };
+
+    // §10.1: walking an sshfs mount is agonising, so when omafile owns the mount the walk
+    // runs on the far end and the returned paths are rewritten back into local mount
+    // paths. A 30-second remote search becomes a 300 ms one.
+    const QString sshHost = Mounts::sshHostFor(root);
+    QString remotePrefix;
+    QString localPrefix;
+
+    QProcess process;
+    if (!sshHost.isEmpty()) {
+        const QString mountRoot = Mounts::runtimeMountRoot() + QLatin1Char('/') + sshHost;
+        remotePrefix = root.mid(mountRoot.size());
+        if (remotePrefix.isEmpty())
+            remotePrefix = QStringLiteral("/");
+        localPrefix = mountRoot;
+
+        process.setProgram(QStringLiteral("ssh"));
+        process.setArguments({ QStringLiteral("-o"), QStringLiteral("BatchMode=yes"),
+                               sshHost,
+                               QStringLiteral("fd %1 -- %2")
+                                   .arg(fdArguments.join(QLatin1Char(' ')),
+                                        QStringLiteral("'%1'").arg(remotePrefix)) });
+    } else {
+        process.setProgram(program);
+        process.setArguments(QStringList(fdArguments) << root);
+    }
     process.setStandardErrorFile(QProcess::nullDevice());
     process.start();
 
@@ -163,14 +189,25 @@ void SearchEngine::searchNames(const QString &root, const QString &query, quint6
     QByteArray pending;
     QList<SearchHit> hits;
     QStringList cache;
+    const bool remote = !sshHost.isEmpty();
     int scanned = 0;
     QElapsedTimer flush;
     flush.start();
 
     const auto consume = [&](const QByteArray &raw) {
-        const QString path = QFile::decodeName(raw);
+        QString path = QFile::decodeName(raw);
         if (path.isEmpty())
             return;
+        // The far end reported its own absolute paths; map them onto the mount so that
+        // everything downstream — opening, copying, dragging — sees an ordinary path.
+        if (remote) {
+            if (remotePrefix != QLatin1String("/") && path.startsWith(remotePrefix))
+                path = localPrefix + path;
+            else if (remotePrefix == QLatin1String("/"))
+                path = localPrefix + path;
+            else
+                return;
+        }
         ++scanned;
         if (cache.size() < kCacheCap)
             cache.append(path);

@@ -68,6 +68,16 @@ All three tiers of §6: fuzzy in-directory filter, `Ctrl+F` recursive name searc
 `fd` with streaming and a warm cache, `Ctrl+Alt+F` content search over ripgrep with line
 numbers and previews. **134 tests pass.**
 
+### M4a — Remote by mount ✅
+`~/.ssh/config` and `known_hosts` parsing, the sidebar (`Ctrl+B`), sshfs/rclone/gio mount
+lifecycle with cross-window refcounting, `/proc/self/mountinfo` for NFS and removable
+media, `Ctrl+S` connect-to, `Ctrl+D` bookmarks, `Ctrl+E` eject, remote-side search, and
+§10.6's no-trash-on-remote policy. **151 tests pass.**
+
+### M4b — Native SFTP — deliberately not started
+See "To verify" below: the plan makes it conditional, and its enabling decision (§16.5)
+is unresolved and unmeasurable on this machine.
+
 **Measured against §12:**
 
 | Budget | Target | Actual |
@@ -120,6 +130,38 @@ created during the initial listing would be missed by inotify forever.
 **Backspace edits the filter before it navigates up — a deviation from §5,** which assigns
 it to "parent directory" unconditionally. With bare letters typing into the filter,
 correcting a typo would otherwise throw you into the parent.
+
+### Remote (M4a)
+
+**omafile keeps no host list of its own.** Hosts come from `~/.ssh/config` (following
+`Include`, with a depth limit so a self-including config cannot hang) and from
+`known_hosts` as a secondary source. Only concrete aliases are offered: `Host *` and
+`!negated` patterns describe rules, not places. Hashed `known_hosts` entries are skipped
+because the name genuinely cannot be recovered from them.
+
+**The alias is what gets handed to ssh, never a rebuilt `user@host`.** The alias carries
+the whole config entry with it — `ProxyJump`, `IdentityFile`, `Match` — and reconstructing
+a target from parsed fields would silently throw all of that away.
+
+**Mounts are refcounted across windows as one file per PID** in
+`$XDG_RUNTIME_DIR/omafile/.refs/<key>/`. A claim from a process that no longer exists is
+self-evidently stale and gets cleaned up, which is what stops an unclean exit leaving an
+orphaned mount forever (§14).
+
+**Search runs on the far end.** When the location is inside an sshfs mount omafile made,
+the walk is `ssh host fd …` and the returned paths are rewritten back onto the mount, so
+everything downstream sees an ordinary local path. §10.1 calls this the single biggest
+reason to build a remote path at all; walking sshfs directly is agonising.
+
+**No trash on a network mount** (§10.6). `Operations::trash` refuses and says so, and the
+Delete key routes to the permanent-delete confirmation instead. Silently creating a
+`.Trash-$uid` on someone's server would be worse than refusing.
+
+**Soft dependencies gray out, they never fail.** `sshfs` and `rclone` are *not* installed
+on this machine, so the honest-degradation paths are the ones actually exercised here: SSH
+hosts still appear in the sidebar carrying "install sshfs to browse", and rclone remotes
+simply do not appear. That is §10.1/§10.3's requirement, and it is the default experience
+of anyone who has not installed the optional tools.
 
 ### Find (M3)
 
@@ -314,6 +356,24 @@ it. The plan says try both for a week.
 
 **Operation summaries could read better.** "Copied 3 to demo" is terse and does not name
 the files when there is only one.
+
+**M4b (native SFTP) is not built, deliberately.** §15 says to "ship M4a first and live on
+it — M4b is worth building only once you've felt where sshfs is actually too slow", and
+§16.5 leaves the enabling decision open pending a measurement: `libssh2` vs `libssh` vs
+`ssh -W` + stdio SFTP, "confirm by measuring connection setup time on a real tunnel before
+committing". That measurement cannot be made here — there is no sshfs, no test host, and
+§14 wants the backend tested against a real sshd in a container. Building it now would be
+speculative work against an unresolved decision. It needs a real remote box and a week of
+using M4a first.
+
+**The sidebar has never been seen.** `Ctrl+B` was wired and the build runs clean, but the
+session locked before it could be captured. Everything behind it is unit-tested; the
+rendering is not.
+
+**Mounting has never been executed.** Without sshfs or rclone installed, `mountSsh` and
+`mountRclone` have only ever taken their "not installed" branch. The gio path is likewise
+unrun. The refcount logic, the option strings and the gvfs path resolution are all
+unproven against a real mount.
 
 **No bulk rename yet** (§9's vimv approach) — that is M5, along with the `Ctrl+?` overlay
 that will be generated from `Shortcuts.qml`'s table.

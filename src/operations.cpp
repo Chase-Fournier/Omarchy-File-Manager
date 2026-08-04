@@ -1,6 +1,7 @@
 #include "operations.h"
 
 #include "clipboard.h"
+#include "mounts.h"
 #include "opener.h"
 
 #include <QClipboard>
@@ -164,6 +165,19 @@ void Operations::trash(const QStringList &paths)
 {
     if (paths.isEmpty())
         return;
+
+    // §10.6: there is no dependable trash on a network mount, and silently creating one
+    // on the far end would be worse than refusing. The caller is expected to have asked
+    // isRemote() and offered a permanent delete instead.
+    for (const QString &path : paths) {
+        if (isRemote(path)) {
+            setStatus(QStringLiteral("no trash on a remote location — Shift+Delete "
+                                     "deletes permanently"));
+            emit completed({});
+            return;
+        }
+    }
+
     const quint64 operation = begin();
     QMetaObject::invokeMethod(m_ops, "trash", Qt::QueuedConnection,
                               Q_ARG(QStringList, paths), Q_ARG(quint64, operation));
@@ -226,6 +240,11 @@ bool Operations::sameFilesystem(const QStringList &paths, const QString &directo
             return false;
     }
     return true;
+}
+
+bool Operations::isRemote(const QString &path)
+{
+    return !Mounts::networkRootFor(path).isEmpty();
 }
 
 void Operations::dropUris(const QStringList &uris, const QString &destinationDir, int action)
@@ -292,6 +311,12 @@ static QString findTerminal()
             return fallback;
     }
     return QString();
+}
+
+void Operations::reportStatus(const QString &message)
+{
+    if (!message.isEmpty())
+        setStatus(message);
 }
 
 void Operations::openTerminal(const QString &directory)

@@ -65,6 +65,8 @@ public:
     Q_INVOKABLE void resolveConflict(int choice, bool applyToAll);
     Q_INVOKABLE void cancel();
     Q_INVOKABLE void openTerminal(const QString &directory);
+    // Lets Places report through the one status line rather than growing its own.
+    Q_INVOKABLE void reportStatus(const QString &message);
     // A content-search hit: $EDITOR at that line, in a terminal. Falls back to xdg-open
     // when there is no editor or no line to jump to.
     Q_INVOKABLE void openAtLine(const QString &path, int line);
@@ -72,6 +74,11 @@ public:
     // True when moving these paths into this directory would stay on one filesystem,
     // which is what makes move the sensible default for a drop (§7).
     Q_INVOKABLE static bool sameFilesystem(const QStringList &paths, const QString &directory);
+
+    // §10.6: a remote location has no reliable trash, so deleting there is always
+    // permanent and must always say so. The UI asks this before choosing which verb the
+    // Delete key runs.
+    Q_INVOKABLE static bool isRemote(const QString &path);
 
 signals:
     void busyChanged();
