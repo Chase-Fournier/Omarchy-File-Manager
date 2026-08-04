@@ -1,0 +1,16 @@
+build/
+Makefile
+*.o
+*.moc
+moc_*.cpp
+moc_*.h
+qrc_*.cpp
+.qmake.stash
+
+# qmlcachegen output, emitted into the source root by qmake
+qmlcache_loader.cpp
+src_qml_*_qml.cpp
+src_resources_qmlcache.qrc
+pkgbuild/*.pkg.tar.*
+pkgbuild/pkg/
+pkgbuild/src/

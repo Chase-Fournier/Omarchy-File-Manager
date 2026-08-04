@@ -1,0 +1,12 @@
+#!/bin/bash
+
+# Build omafile into build/omafile
+
+set -e
+
+cd "$(dirname "$0")/.."
+
+qmake6 omafile.pro
+make -j"$(nproc)"
+
+echo "Built build/omafile"
