@@ -4,6 +4,8 @@
 #include "location.h"
 #include "mounts.h"
 
+#include <QTimer>
+
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -24,12 +26,19 @@ QString bookmarksFile()
 }
 
 QString runCommand(const QString &program, const QStringList &arguments, int timeoutMs,
-                   QString *error)
+                   QString *error, const QString &stdinData = QString())
 {
     QProcess process;
     process.setProgram(program);
     process.setArguments(arguments);
     process.start();
+
+    if (!stdinData.isEmpty()) {
+        process.write(stdinData.toUtf8());
+        process.write("\n");
+        // sshfs reads exactly one line and then expects the pipe to close.
+        process.closeWriteChannel();
+    }
 
     if (!process.waitForStarted(3000)) {
         *error = QStringLiteral("could not run %1").arg(program);
@@ -41,9 +50,12 @@ QString runCommand(const QString &program, const QStringList &arguments, int tim
         return {};
     }
     if (process.exitCode() != 0) {
+        // The whole of stderr, not just its last line: ssh prints the diagnosis
+        // ("Permission denied (publickey,password)") and sshfs then prints a generic
+        // "read: Connection reset by peer" after it. Keeping only the last line threw
+        // away the one part that explains what happened.
         const QString stderrText = QString::fromUtf8(process.readAllStandardError()).trimmed();
-        *error = stderrText.isEmpty() ? QStringLiteral("%1 failed").arg(program)
-                                      : stderrText.section(QLatin1Char('\n'), -1);
+        *error = stderrText.isEmpty() ? QStringLiteral("%1 failed").arg(program) : stderrText;
         return {};
     }
     return QString::fromUtf8(process.readAllStandardOutput()).trimmed();
@@ -281,8 +293,112 @@ void Places::releaseMounts()
     }
 }
 
-QString Places::mountSsh(const QString &hostAlias, QString *error)
+bool Places::looksLikeAuthFailure(const QString &error)
 {
+    const QString lower = error.toLower();
+    // Only genuine authentication signatures. A bare "connection reset by peer" is *not*
+    // one of them: the probe has already ruled auth out by that point, so treating a
+    // reset as an auth failure asked for a password the server does not even accept —
+    // and then failed again with the identical message.
+    return lower.contains(QStringLiteral("denied")) || lower.contains(QStringLiteral("authenticat"))
+        || lower.contains(QStringLiteral("password"))
+        || lower.contains(QStringLiteral("passphrase"));
+}
+
+// The most informative line to actually show someone, since `error` is now the whole of
+// stderr rather than one line of it.
+static QString bestErrorLine(const QString &text)
+{
+    const QStringList lines = text.split(QLatin1Char('\n'), Qt::SkipEmptyParts);
+    for (const QString &line : lines) {
+        const QString lower = line.toLower();
+        if (lower.contains(QStringLiteral("subsystem")))
+            return QStringLiteral("the server has no sftp subsystem, so sshfs cannot "
+                                  "mount it");
+        if (lower.contains(QStringLiteral("denied")) || lower.contains(QStringLiteral("authenticat"))
+            || lower.contains(QStringLiteral("not known")) || lower.contains(QStringLiteral("no such"))
+            || lower.contains(QStringLiteral("timed out")) || lower.contains(QStringLiteral("refused"))
+            || lower.contains(QStringLiteral("unreachable")))
+            return line.trimmed();
+    }
+    return lines.isEmpty() ? QString() : lines.last().trimmed();
+}
+
+bool Places::hasGvfsSftp()
+{
+    return Mounts::hasGio()
+        && QFileInfo::exists(QStringLiteral("/usr/share/gvfs/mounts/sftp.mount"));
+}
+
+// How Nautilus, Files and Thunar all do it. gvfs speaks sftp itself and owns the
+// authentication dialogs, so a password, a key passphrase, an unknown host key and
+// keyboard-interactive 2FA are all handled without omafile touching a credential (§10.7).
+// sshfs cannot ask the user anything at all, which is why it was the wrong default.
+QString Places::mountSftpViaGio(const SshHost &host, QString *error)
+{
+    // gvfs does not read ~/.ssh/config, so the alias has to be resolved to the real
+    // host, user and port first — which is exactly what Hosts already parsed.
+    QString uri = QStringLiteral("sftp://");
+    if (!host.user.isEmpty())
+        uri += host.user + QLatin1Char('@');
+    uri += host.hostName;
+    if (host.port != 22)
+        uri += QLatin1Char(':') + QString::number(host.port);
+    uri += QLatin1Char('/');
+
+    const QString gvfs = QStringLiteral("/run/user/%1/gvfs").arg(::getuid());
+    const QStringList before = QDir(gvfs).entryList(QDir::Dirs | QDir::NoDotAndDotDot);
+
+    QString mountError;
+    runCommand(QStringLiteral("gio"), { QStringLiteral("mount"), uri }, 120000, &mountError);
+    if (!mountError.isEmpty() && !mountError.contains(QStringLiteral("already mounted"))) {
+        *error = mountError;
+        return {};
+    }
+
+    // Whatever appeared that was not there before is ours; comparing beats guessing at
+    // gvfs' path-mangling rules.
+    const QStringList after = QDir(gvfs).entryList(QDir::Dirs | QDir::NoDotAndDotDot);
+    for (const QString &entry : after) {
+        if (!before.contains(entry))
+            return gvfs + QLatin1Char('/') + entry;
+    }
+    for (const QString &entry : after) {
+        if (entry.contains(QStringLiteral("sftp")) && entry.contains(host.hostName))
+            return gvfs + QLatin1Char('/') + entry;
+    }
+
+    *error = QStringLiteral("mounted, but could not find where");
+    return {};
+}
+
+QString Places::mountSsh(const QString &hostAlias, const QString &password, QString *error)
+{
+    // Look the alias up once: ProxyJump decides which backend can even work.
+    SshHost host;
+    host.alias = hostAlias;
+    host.hostName = hostAlias;
+    const QList<SshHost> known = Hosts::all();
+    for (const SshHost &candidate : known) {
+        if (candidate.alias == hostAlias) {
+            host = candidate;
+            break;
+        }
+    }
+
+    // gvfs first, because it can actually ask for credentials — unless the host needs
+    // ProxyJump, which only real ssh (and therefore sshfs) understands.
+    if (password.isEmpty() && host.proxyJump.isEmpty() && hasGvfsSftp()) {
+        QString gioError;
+        const QString path = mountSftpViaGio(host, &gioError);
+        if (!path.isEmpty())
+            return path;
+        *error = gioError;
+        // Fall through to sshfs only if it is even available.
+        if (!Mounts::hasSshfs())
+            return {};
+    }
+
     if (!Mounts::hasSshfs()) {
         *error = QStringLiteral("sshfs is not installed");
         return {};
@@ -295,9 +411,32 @@ QString Places::mountSsh(const QString &hostAlias, QString *error)
     }
     QDir().mkpath(target);
 
+    // Ask sftp what would happen before asking sshfs to do it. sshfs discards ssh's
+    // stderr and reports every possible failure as "read: Connection reset by peer", so
+    // an unresolvable host, a refused connection, a missing sftp subsystem and "this
+    // server wants a password" are indistinguishable through sshfs alone.
+    //
+    // The probe is sftp rather than ssh because sshfs mounts over the *sftp subsystem*
+    // (`-s sftp`). A locked-down box can accept `ssh host true` perfectly well and still
+    // have no sftp-server, which is precisely the case that produced a bare "connection
+    // reset by peer" and no explanation.
+    if (password.isEmpty()) {
+        QString probeError;
+        runCommand(QStringLiteral("sftp"),
+                   { QStringLiteral("-o"), QStringLiteral("BatchMode=yes"),
+                     QStringLiteral("-o"), QStringLiteral("ConnectTimeout=8"),
+                     QStringLiteral("-b"), QStringLiteral("/dev/null"), hostAlias },
+                   15000, &probeError);
+        if (!probeError.isEmpty()) {
+            *error = probeError;
+            QDir().rmdir(target);
+            return {};
+        }
+    }
+
     // The options from §10.1: survive a dropped link, notice a dead one within ~45 s,
     // and cache aggressively because every round trip is expensive.
-    const QStringList options = {
+    QStringList options = {
         QStringLiteral("reconnect"),
         QStringLiteral("ServerAliveInterval=15"),
         QStringLiteral("ServerAliveCountMax=3"),
@@ -307,10 +446,18 @@ QString Places::mountSsh(const QString &hostAlias, QString *error)
         QStringLiteral("idmap=user"),
     };
 
+    // Without a password, refuse to let ssh prompt: there is no terminal behind this, so
+    // an interactive prompt would simply hang until the timeout and then fail with
+    // nothing useful to say. BatchMode turns that into an immediate, legible refusal.
+    if (password.isEmpty())
+        options.append(QStringLiteral("BatchMode=yes"));
+    else
+        options.append(QStringLiteral("password_stdin"));
+
     runCommand(QStringLiteral("sshfs"),
                { hostAlias + QLatin1Char(':'), target, QStringLiteral("-o"),
                  options.join(QLatin1Char(',')) },
-               20000, error);
+               20000, error, password);
     if (!error->isEmpty()) {
         QDir().rmdir(target);
         return {};
@@ -409,17 +556,134 @@ void Places::activate(int row)
 
     setBusy(true);
     QString error;
-    const QString path = place.kind == Place::SshHost ? mountSsh(place.target, &error)
-                                                      : mountRclone(place.target, &error);
+    const QString path = place.kind == Place::SshHost
+        ? mountSsh(place.target, QString(), &error)
+        : mountRclone(place.target, &error);
     setBusy(false);
 
     if (path.isEmpty()) {
-        emit status(error);
+        // The agent and the keys were not enough, but a password might be.
+        if (place.kind == Place::SshHost && looksLikeAuthFailure(error)) {
+            m_pendingHost = place.target;
+            m_pendingSubPath.clear();
+            emit passwordRequired(QStringLiteral("Password for %1").arg(place.target));
+            return;
+        }
+        emit connectFailed(place.target, bestErrorLine(error));
         return;
     }
 
+    finishConnect(path);
+}
+
+void Places::finishConnect(const QString &mountPath)
+{
     refresh();
-    emit navigate(path);
+    emit navigate(mountPath);
+}
+
+void Places::providePassword(const QString &password)
+{
+    if (m_pendingHost.isEmpty() || password.isEmpty()) {
+        cancelPassword();
+        return;
+    }
+
+    const QString host = m_pendingHost;
+    const QString subPath = m_pendingSubPath;
+    m_pendingHost.clear();
+    m_pendingSubPath.clear();
+
+    setBusy(true);
+    QString error;
+    QString path = mountSsh(host, password, &error);
+    setBusy(false);
+    // Nothing keeps a reference to the password past this point: it went to the child's
+    // stdin and the local copy dies with this call (§10.7).
+
+    if (path.isEmpty()) {
+        emit status(error.isEmpty() ? QStringLiteral("could not connect")
+                                    : bestErrorLine(error));
+        return;
+    }
+    if (!subPath.isEmpty() && subPath != QLatin1String("/"))
+        path += subPath;
+    finishConnect(path);
+}
+
+// Hands the whole problem to a real terminal: ssh can then prompt for anything it likes
+// — passphrase, verification code, an unknown host key — and the user answers it. Once
+// the mount appears, omafile picks it up and navigates there.
+void Places::connectInTerminal(const QString &hostAlias)
+{
+    if (!Mounts::hasSshfs()) {
+        emit status(QStringLiteral("install sshfs to connect from a terminal"));
+        return;
+    }
+
+    const QString target = Mounts::runtimeMountRoot() + QLatin1Char('/') + hostAlias;
+    QDir().mkpath(target);
+
+    // No BatchMode and no password_stdin: the entire point is that ssh may ask.
+    const QString command =
+        QStringLiteral("sshfs %1: %2 -o reconnect,ServerAliveInterval=15,"
+                       "ServerAliveCountMax=3,cache_timeout=60,kernel_cache,"
+                       "compression=no,idmap=user")
+            .arg(hostAlias, target);
+
+    QString terminal = QString::fromLocal8Bit(qgetenv("TERMINAL"));
+    if (terminal.isEmpty() || QStandardPaths::findExecutable(terminal).isEmpty()) {
+        for (const QString &fallback : { QStringLiteral("alacritty"), QStringLiteral("ghostty"),
+                                         QStringLiteral("kitty"), QStringLiteral("foot"),
+                                         QStringLiteral("xterm") }) {
+            if (!QStandardPaths::findExecutable(fallback).isEmpty()) {
+                terminal = fallback;
+                break;
+            }
+        }
+    }
+    if (terminal.isEmpty()) {
+        emit status(QStringLiteral("no terminal found"));
+        return;
+    }
+
+    QProcess process;
+    process.setProgram(terminal);
+    // Keep the window up on failure so the error is readable rather than flashing past.
+    process.setArguments({ QStringLiteral("-e"), QStringLiteral("sh"), QStringLiteral("-c"),
+                           command + QStringLiteral("; echo; echo '[press enter to close]'; "
+                                                    "read _") });
+    process.startDetached();
+
+    emit status(QStringLiteral("connecting to %1 in a terminal…").arg(hostAlias));
+
+    // Poll for the mount rather than trying to follow the detached process.
+    m_terminalHost = hostAlias;
+    if (!m_terminalWatch) {
+        m_terminalWatch = new QTimer(this);
+        m_terminalWatch->setInterval(1000);
+        connect(m_terminalWatch, &QTimer::timeout, this, [this] {
+            const QString path =
+                Mounts::runtimeMountRoot() + QLatin1Char('/') + m_terminalHost;
+            if (!isMountedAt(path))
+                return;
+            m_terminalWatch->stop();
+            claimMount(m_terminalHost);
+            finishConnect(path);
+        });
+    }
+    m_terminalWatch->start();
+    // Give up watching after two minutes rather than polling forever.
+    QTimer::singleShot(120000, this, [this] {
+        if (m_terminalWatch)
+            m_terminalWatch->stop();
+    });
+}
+
+void Places::cancelPassword()
+{
+    m_pendingHost.clear();
+    m_pendingSubPath.clear();
 }
 
 void Places::eject(int row)
@@ -496,8 +760,14 @@ void Places::connectTo(const QString &input)
         for (const SshHost &host : hosts) {
             if (host.alias == trimmed) {
                 setBusy(true);
-                path = mountSsh(trimmed, &error);
+                path = mountSsh(trimmed, QString(), &error);
                 setBusy(false);
+                if (path.isEmpty() && looksLikeAuthFailure(error)) {
+                    m_pendingHost = trimmed;
+                    m_pendingSubPath.clear();
+                    emit passwordRequired(QStringLiteral("Password for %1").arg(trimmed));
+                    return;
+                }
                 break;
             }
         }
@@ -508,8 +778,14 @@ void Places::connectTo(const QString &input)
     } else if (location.scheme() == QLatin1String("ssh")
                || location.scheme() == QLatin1String("sftp")) {
         setBusy(true);
-        path = mountSsh(location.host(), &error);
+        path = mountSsh(location.host(), QString(), &error);
         setBusy(false);
+        if (path.isEmpty() && looksLikeAuthFailure(error)) {
+            m_pendingHost = location.host();
+            m_pendingSubPath = location.path();
+            emit passwordRequired(QStringLiteral("Password for %1").arg(location.host()));
+            return;
+        }
         if (!path.isEmpty() && location.path() != QLatin1String("/"))
             path += location.path();
     } else if (location.scheme() == QLatin1String("rclone")) {
@@ -525,7 +801,8 @@ void Places::connectTo(const QString &input)
     }
 
     if (path.isEmpty()) {
-        emit status(error.isEmpty() ? QStringLiteral("could not connect") : error);
+        emit status(error.isEmpty() ? QStringLiteral("could not connect")
+                                    : bestErrorLine(error));
         return;
     }
 

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "hosts.h"
+
 #include <QAbstractListModel>
 #include <QProcess>
 
@@ -63,6 +65,12 @@ public:
     // Ctrl+S: accepts ssh://, sftp://, smb://, davs://, mtp://, rclone:remote:path, a
     // bare ~/.ssh/config host name, or a plain path (§10.5).
     Q_INVOKABLE void connectTo(const QString &input);
+    // Answers passwordRequired. The password is used once and never stored (§10.7).
+    Q_INVOKABLE void providePassword(const QString &password);
+    Q_INVOKABLE void cancelPassword();
+    // The escape hatch: run the mount in a real terminal so ssh can ask whatever it
+    // needs — passphrase, 2FA, a host key to trust — and answer it directly.
+    Q_INVOKABLE void connectInTerminal(const QString &hostAlias);
     Q_INVOKABLE QStringList completions() const;
 
     // Releases every mount this process is holding, unmounting those nobody else wants.
@@ -73,6 +81,10 @@ signals:
     void busyChanged();
     void navigate(const QString &location);
     void status(const QString &message);
+    // The key or agent was not enough. The UI prompts, masked, and calls back.
+    void passwordRequired(const QString &prompt);
+    // Nothing automatic worked. The UI offers to hand the user a terminal.
+    void connectFailed(const QString &hostAlias, const QString &message);
 
 private:
     void rebuild();
@@ -80,7 +92,17 @@ private:
 
     // Mount helpers. Each returns the local path the remote now appears at, or empty on
     // failure with `error` set.
-    QString mountSsh(const QString &hostAlias, QString *error);
+    // An empty password means "try the agent and keys only, and fail fast".
+    QString mountSsh(const QString &hostAlias, const QString &password, QString *error);
+    // gvfs' own sftp backend, which is how every other file manager on this desktop does
+    // it: it owns the authentication dialogs, so passphrases, host-key trust and
+    // keyboard-interactive all just work.
+    static bool hasGvfsSftp();
+    QString mountSftpViaGio(const SshHost &host, QString *error);
+    // Distinguishes "wrong credentials" from "host is down", so we only prompt when a
+    // password could actually help.
+    static bool looksLikeAuthFailure(const QString &error);
+    void finishConnect(const QString &mountPath);
     QString mountRclone(const QString &remote, QString *error);
     QString mountGio(const QString &uri, QString *error);
 
@@ -95,4 +117,11 @@ private:
     QStringList m_bookmarks;
     QStringList m_heldMounts;
     bool m_busy = false;
+
+    // What a pending password prompt is for. Cleared as soon as it is answered.
+    QString m_pendingHost;
+    QString m_pendingSubPath;
+    // Watches for a terminal-driven mount to appear.
+    class QTimer *m_terminalWatch = nullptr;
+    QString m_terminalHost;
 };

@@ -157,8 +157,54 @@ reason to build a remote path at all; walking sshfs directly is agonising.
 Delete key routes to the permanent-delete confirmation instead. Silently creating a
 `.Trash-$uid` on someone's server would be worse than refusing.
 
-**Soft dependencies gray out, they never fail.** `sshfs` and `rclone` are *not* installed
-on this machine, so the honest-degradation paths are the ones actually exercised here: SSH
+**SSH mounts go through gvfs, not sshfs — the same way every other file manager on this
+desktop does it.** `gio mount sftp://…` is what Nautilus, Files and Thunar use, and the
+reason matters: **gvfs owns the authentication dialogs.** A password, a key passphrase, an
+unknown host key, keyboard-interactive 2FA — gvfs can ask for all of them, and omafile
+never touches a credential (§10.7). sshfs cannot ask the user *anything*: it has no
+terminal and no dialog, which is why every failure arrived as an unexplained
+"connection reset by peer".
+
+§10.1 specified sshfs, and that was the wrong default for anything but key-only hosts.
+sshfs is kept for the one case gvfs cannot serve: a host needing `ProxyJump`, which only
+real ssh understands. gvfs does not read `~/.ssh/config` either, so the alias is resolved
+to host/user/port from the config omafile already parsed before handing it over.
+
+**When nothing automatic works, the user gets a terminal.** `connectInTerminal` runs sshfs
+in a real terminal with no BatchMode and no `password_stdin`, so ssh can prompt for
+whatever it likes and be answered directly; omafile then polls for the mount to appear and
+navigates there. It is offered from the failure dialog rather than being a dead end. This
+is the honest answer for a Cloudflare Access device flow or a hardware token, which no
+amount of piping can automate.
+
+**sshfs is asked to mount only after `sftp` has been asked what would happen.** sshfs
+discards ssh's stderr and reports *every* failure as `read: Connection reset by peer` — an
+unresolvable host, a refused connection, a missing sftp subsystem and "this server wants a
+password" are literally indistinguishable through sshfs alone.
+
+The probe is **`sftp -o BatchMode=yes -b /dev/null <alias>`, not `ssh <alias> true`**.
+sshfs mounts over the *sftp subsystem* (`-s sftp` → `/usr/lib/sftp-server`), so a
+locked-down box can answer `ssh host true` perfectly well and still have no sftp-server —
+which is exactly the case that produced a bare "connection reset by peer" with no
+explanation. Probing with ssh proves the wrong thing.
+
+**A reset at mount time is not evidence of an authentication problem.** Treating it as one
+was a real bug: the probe has already ruled auth out by then, so it prompted for a
+password on a key-only server, sent it via `password_stdin`, and failed again with the
+identical message. Only genuine auth signatures (denied / authenticat / password /
+passphrase) trigger the prompt now.
+
+**sshfs is never allowed to prompt on a terminal that does not exist.** The first mount
+attempt adds `BatchMode=yes`, so a host that needs a password fails *immediately and
+legibly* instead of hanging until the timeout on an invisible prompt. Only then does
+omafile ask, masked, and retry with `-o password_stdin`, writing the password to the
+child's stdin and closing the pipe. It is used once and never stored — no member field
+holds it, and it is deliberately kept out of the status line and every log (§10.7).
+A failure that does not look like an authentication problem is reported as-is rather than
+prompting, so an unreachable host does not ask for a password it cannot use.
+
+**Soft dependencies gray out, they never fail.** `rclone` is *not* installed on this
+machine (`sshfs` now is), so the honest-degradation paths are the ones actually exercised here: SSH
 hosts still appear in the sidebar carrying "install sshfs to browse", and rclone remotes
 simply do not appear. That is §10.1/§10.3's requirement, and it is the default experience
 of anyone who has not installed the optional tools.
@@ -370,7 +416,17 @@ using M4a first.
 session locked before it could be captured. Everything behind it is unit-tested; the
 rendering is not.
 
-**Mounting has never been executed.** Without sshfs or rclone installed, `mountSsh` and
+**Connecting blocks the GUI thread** for as long as the ssh probe plus the mount takes —
+bounded at roughly 8 s by `ConnectTimeout`, but still a freeze. Mounting should move to a
+worker like every other slow operation; it has not yet.
+
+**The password retry is still unrun.** The probe and its classification are verified
+against a real unresolvable host, but `-o password_stdin` has never run against a server
+that actually asks for a password. A key *passphrase* (as opposed to a host password) may
+additionally need `SSH_ASKPASS`, which is not implemented — `ssh-agent` covers it in
+practice on Omarchy.
+
+**Mounting has never been executed end to end.** Without sshfs or rclone installed, `mountSsh` and
 `mountRclone` have only ever taken their "not installed" branch. The gio path is likewise
 unrun. The refcount logic, the option strings and the gvfs path resolution are all
 unproven against a real mount.

@@ -80,6 +80,7 @@ Window {
                       + "rclone:remote:path, or a host from ~/.ssh/config"
         overlay.initialText = ""
         overlay.offerApplyToAll = false
+        overlay.secret = false
         overlay.pending = "connect"
         overlay.open()
     }
@@ -315,6 +316,7 @@ Window {
         overlay.label = "New folder"
         overlay.initialText = "untitled"
         overlay.offerApplyToAll = false
+        overlay.secret = false
         overlay.pending = "newFolder"
         overlay.open()
     }
@@ -329,6 +331,7 @@ Window {
         overlay.choices = [{ key: "d", label: "Delete", value: 1 },
                            { key: "c", label: "Cancel", value: 0 }]
         overlay.offerApplyToAll = false
+        overlay.secret = false
         overlay.pending = "delete"
         overlay.open()
     }
@@ -426,6 +429,33 @@ Window {
         target: Places
         function onNavigate(location) { Dir.navigate(location) }
         function onStatus(message) { Ops.reportStatus(message) }
+
+        // Nothing automatic worked. Rather than leaving a dead end, offer the terminal:
+        // ssh can ask for anything there — a passphrase, a verification code, an unknown
+        // host key — and omafile picks the mount up once it appears.
+        function onConnectFailed(hostAlias, message) {
+            overlay.mode = "choice"
+            overlay.secret = false
+            overlay.label = message + "\n\nOpen a terminal and connect to \"" + hostAlias
+                          + "\" by hand?"
+            overlay.choices = [{ key: "t", label: "Open terminal", value: 1 },
+                               { key: "c", label: "Cancel", value: 0 }]
+            overlay.offerApplyToAll = false
+            overlay.pending = "connectTerminal"
+            overlay.pendingHost = hostAlias
+            overlay.open()
+        }
+
+        // §10.7: prompted per session, held in memory only, never written anywhere.
+        function onPasswordRequired(prompt) {
+            overlay.mode = "text"
+            overlay.label = prompt
+            overlay.initialText = ""
+            overlay.secret = true
+            overlay.offerApplyToAll = false
+            overlay.pending = "password"
+            overlay.open()
+        }
     }
 
     Connections {
@@ -867,18 +897,26 @@ Window {
         app: root
         // Which caller opened it, so one overlay can serve several questions.
         property string pending: ""
+        property string pendingHost: ""
 
         onAccepted: function (text) {
             if (pending === "newFolder")
                 Ops.newFolder(Dir.path, text)
             else if (pending === "connect")
                 Places.connectTo(text)
+            else if (pending === "password")
+                Places.providePassword(text)
         }
         onChose: function (value) {
             if (pending === "delete" && value === 1)
                 Ops.deletePermanently(Dir.actionPaths())
+            else if (pending === "connectTerminal" && value === 1)
+                Places.connectInTerminal(pendingHost)
         }
-        onCancelled: {}
+        onCancelled: {
+            if (pending === "password")
+                Places.cancelPassword()
+        }
     }
 
     // The conflict question is driven by the worker, not by a verb, so it lives outside

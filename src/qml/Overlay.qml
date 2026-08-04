@@ -16,6 +16,8 @@ FocusScope {
     property var choices: []          // [{ key: "r", label: "Replace", value: 0 }, ...]
     property bool offerApplyToAll: false
     property bool applyToAll: false
+    // Masks the field and skips the "looks like a filename" validation.
+    property bool secret: false
 
     signal accepted(string text)
     signal chose(int value, bool all)
@@ -106,7 +108,11 @@ FocusScope {
                 font.family: app.monoFamily
                 font.pixelSize: app.fontSize
 
-                readonly property bool acceptable: text.length > 0 && !text.includes("/")
+                echoMode: overlay.secret ? TextInput.Password : TextInput.Normal
+                // A password may contain anything, including a slash.
+                readonly property bool acceptable: overlay.secret
+                                                   ? text.length > 0
+                                                   : text.length > 0 && !text.includes("/")
 
                 onAccepted: {
                     if (!acceptable)
