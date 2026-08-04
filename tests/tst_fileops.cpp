@@ -2,6 +2,7 @@
 
 #include "fileops.h"
 #include "journal.h"
+#include "operations.h"
 #include "trash.h"
 
 #include <QDir>
@@ -531,4 +532,25 @@ void TestFileOps::permanentDeleteIsNotUndoable()
     QVERIFY(!QFileInfo::exists(path(QStringLiteral("work/doomedDir"))));
     // No journal entry, which is exactly what the confirm dialog promises.
     QVERIFY(!entry.isUndoable());
+}
+
+// The drag-out payload. QML's encodeURI leaves '#' and '?' alone, so building this in
+// JavaScript silently truncated any path containing them once the receiving app parsed
+// the list — which is a data-loss bug wearing a formatting bug's clothes.
+void TestFileOps::uriListEncodesAwkwardPaths()
+{
+    const QString list = Operations::uriList({ QStringLiteral("/tmp/a b.txt"),
+                                               QStringLiteral("/tmp/hash#tag.txt"),
+                                               QStringLiteral("/tmp/query?x=1.txt"),
+                                               QStringLiteral("/tmp/100%.txt") });
+
+    const QStringList lines = list.split(QStringLiteral("\r\n"));
+    QCOMPARE(lines.size(), 4);
+    QCOMPARE(lines.at(0), QStringLiteral("file:///tmp/a%20b.txt"));
+    QCOMPARE(lines.at(1), QStringLiteral("file:///tmp/hash%23tag.txt"));
+    QCOMPARE(lines.at(2), QStringLiteral("file:///tmp/query%3Fx=1.txt"));
+    QCOMPARE(lines.at(3), QStringLiteral("file:///tmp/100%25.txt"));
+
+    // RFC 2483 says CRLF, and GTK's parser is strict about it.
+    QVERIFY(list.contains(QStringLiteral("\r\n")));
 }

@@ -77,9 +77,28 @@ bool Operations::canPaste() const
     return Clipboard::hasPaths();
 }
 
-quint64 Operations::begin(const QString &selectAfter)
+QString Operations::uriList(const QStringList &paths)
 {
-    m_selectAfter = selectAfter;
+    QStringList lines;
+    lines.reserve(paths.size());
+    for (const QString &path : paths)
+        lines.append(QString::fromLatin1(QUrl::fromLocalFile(path).toEncoded()));
+    // text/uri-list is CRLF-delimited by RFC 2483.
+    return lines.join(QStringLiteral("\r\n"));
+}
+
+QStringList Operations::producedNames(const JournalEntry &journal)
+{
+    QStringList names;
+    for (const QString &path : journal.created)
+        names.append(QFileInfo(path).fileName());
+    for (const auto &move : journal.moves)
+        names.append(QFileInfo(move.second).fileName());
+    return names;
+}
+
+quint64 Operations::begin()
+{
     m_progress = 0.0;
     m_progressName.clear();
     if (!m_busy) {
@@ -129,8 +148,7 @@ void Operations::paste(const QString &destinationDir)
     if (paths.isEmpty() || destinationDir.isEmpty())
         return;
 
-    const QString id = QFileInfo(paths.first()).fileName();
-    const quint64 operation = begin(id);
+    const quint64 operation = begin();
 
     QMetaObject::invokeMethod(m_ops, cut ? "move" : "copy", Qt::QueuedConnection,
                               Q_ARG(QStringList, paths), Q_ARG(QString, destinationDir),
@@ -163,7 +181,7 @@ void Operations::newFolder(const QString &parentDir, const QString &name)
 {
     if (parentDir.isEmpty() || name.isEmpty())
         return;
-    const quint64 operation = begin(name);
+    const quint64 operation = begin();
     QMetaObject::invokeMethod(m_ops, "makeDirectory", Qt::QueuedConnection,
                               Q_ARG(QString, parentDir), Q_ARG(QString, name),
                               Q_ARG(quint64, operation));
@@ -176,7 +194,7 @@ void Operations::rename(const QString &path, const QString &newName)
     if (QFileInfo(path).fileName() == newName)
         return; // nothing to do, and journalling it would waste an undo slot
 
-    const quint64 operation = begin(newName);
+    const quint64 operation = begin();
     QMetaObject::invokeMethod(m_ops, "renameEntry", Qt::QueuedConnection,
                               Q_ARG(QString, path), Q_ARG(QString, newName),
                               Q_ARG(quint64, operation));
@@ -212,8 +230,10 @@ bool Operations::sameFilesystem(const QStringList &paths, const QString &directo
 void Operations::dropUris(const QStringList &uris, const QString &destinationDir, int action)
 {
     const QStringList paths = localPathsFromUris(uris);
-    if (paths.isEmpty() || destinationDir.isEmpty())
+    if (paths.isEmpty() || destinationDir.isEmpty()) {
+        setStatus(QStringLiteral("nothing usable in that drop"));
         return;
+    }
 
     // Dropping something into the directory it already lives in is a no-op, not a
     // duplicate — the alternative is a stray "file (2)" every time a drag misses.
@@ -222,15 +242,17 @@ void Operations::dropUris(const QStringList &uris, const QString &destinationDir
         if (QFileInfo(path).absolutePath() != QFileInfo(destinationDir).absoluteFilePath())
             usable.append(path);
     }
-    if (usable.isEmpty())
+    if (usable.isEmpty()) {
+        setStatus(QStringLiteral("already here"));
         return;
+    }
 
     // §7: move within a filesystem, copy across one, unless the modifier said otherwise.
     bool asMove = action == 2;
     if (action == 0)
         asMove = sameFilesystem(usable, destinationDir);
 
-    const quint64 operation = begin(QFileInfo(usable.first()).fileName());
+    const quint64 operation = begin();
     QMetaObject::invokeMethod(m_ops, asMove ? "move" : "copy", Qt::QueuedConnection,
                               Q_ARG(QStringList, usable), Q_ARG(QString, destinationDir),
                               Q_ARG(quint64, operation));
@@ -341,8 +363,7 @@ void Operations::onFinished(quint64 id, const JournalEntry &journal)
                       : journal.summary);
     }
 
-    emit completed(m_selectAfter);
-    m_selectAfter.clear();
+    emit completed(producedNames(journal));
 }
 
 void Operations::onFailed(quint64 id, const QString &message)
@@ -355,5 +376,5 @@ void Operations::onFailed(quint64 id, const QString &message)
     emit busyChanged();
     emit progressChanged();
     setStatus(message);
-    emit completed(QString());
+    emit completed({});
 }

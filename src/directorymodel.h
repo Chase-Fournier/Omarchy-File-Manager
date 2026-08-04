@@ -90,6 +90,8 @@ public:
 
     int currentIndex() const { return m_currentIndex; }
     void setCurrentIndex(int index);
+    // resetAnchor is false only for the extending moves, which must keep their origin.
+    void setCurrent(int index, bool resetAnchor);
     QString currentName() const;
     QString currentSizeText() const;
 
@@ -121,8 +123,13 @@ public:
     Q_INVOKABLE void toggleSelection(int row);
     Q_INVOKABLE void selectAll();
     Q_INVOKABLE void clearSelection();
-    // Shift+Up/Down: move the cursor and take everything it passes over with it.
+    // Shift+Up/Down: move the cursor and take everything between the anchor and it.
     Q_INVOKABLE void extendSelection(int delta);
+    // Shift+click: select everything between the anchor and this row.
+    Q_INVOKABLE void selectTo(int row);
+    // Select a set of entries by name, used to leave a drop's results selected. Like
+    // selectByName, it waits for an in-flight listing rather than selecting nothing.
+    Q_INVOKABLE void selectNames(const QStringList &names);
 
     // What an operation should act on: the explicit selection, or the current row when
     // nothing is explicitly selected. Every verb in the UI goes through this.
@@ -164,6 +171,7 @@ private:
     void rebuildIndex();
     void requestAllStats();
     void restoreCurrentByName(const QString &name);
+    void applySelectNames(const QStringList &names);
     void setLoading(bool loading);
 
     Location m_location;
@@ -188,8 +196,13 @@ private:
 
     // Set by goParent so the directory just left is selected once the listing lands.
     QString m_pendingSelect;
+    // Set by an operation's results, applied on the same listing boundary.
+    QStringList m_pendingSelectNames;
 
     QSet<QString> m_selected;
+    // Where a range selection measures from. Plain cursor moves reset it; extending
+    // moves deliberately do not, so Shift+Down Down Down grows one run.
+    int m_anchor = -1;
 
     QThread m_thread;
     Lister *m_lister = nullptr;

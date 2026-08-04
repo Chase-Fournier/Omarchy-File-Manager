@@ -57,6 +57,11 @@ public:
     Q_INVOKABLE void dropUris(const QStringList &uris, const QString &destinationDir,
                               int action);
 
+    // Properly percent-encoded file:// URIs, one per line. Built here rather than in
+    // QML because encodeURI leaves '#' and '?' unescaped, which corrupts any path
+    // containing them the moment another app parses the list.
+    Q_INVOKABLE static QString uriList(const QStringList &paths);
+
     Q_INVOKABLE void resolveConflict(int choice, bool applyToAll);
     Q_INVOKABLE void cancel();
     Q_INVOKABLE void openTerminal(const QString &directory);
@@ -73,8 +78,9 @@ signals:
     void clipboardChanged();
     void conflictChanged();
 
-    // The model listens for this to refresh and to select what was just created.
-    void completed(const QString &selectName);
+    // The model listens for this to refresh and to select whatever the operation
+    // produced, so a drop or a paste leaves its results selected and ready to act on.
+    void completed(const QStringList &selectNames);
 
 private slots:
     void onProgress(quint64 id, double fraction, const QString &name);
@@ -84,7 +90,10 @@ private slots:
 
 private:
     // Every call goes through here so busy/progress bookkeeping cannot be forgotten.
-    quint64 begin(const QString &selectAfter = QString());
+    quint64 begin();
+    // What an operation produced, derived from its journal entry rather than guessed up
+    // front — so a file renamed by conflict resolution is still the one selected.
+    static QStringList producedNames(const JournalEntry &journal);
     void setStatus(const QString &text);
 
     FileOps *m_ops = nullptr;
@@ -96,7 +105,6 @@ private:
     double m_progress = 0.0;
     QString m_progressName;
     QString m_status;
-    QString m_selectAfter;
 
     bool m_conflictActive = false;
     QString m_conflictName;

@@ -25,7 +25,9 @@ SOURCES += \
     ../src/journal.cpp \
     ../src/lister.cpp \
     ../src/location.cpp \
+    ../src/clipboard.cpp \
     ../src/opener.cpp \
+    ../src/operations.cpp \
     ../src/theme.cpp \
     ../src/trash.cpp \
     ../src/watcher.cpp
@@ -43,7 +45,9 @@ HEADERS += \
     ../src/journal.h \
     ../src/lister.h \
     ../src/location.h \
+    ../src/clipboard.h \
     ../src/opener.h \
+    ../src/operations.h \
     ../src/theme.h \
     ../src/trash.h \
     ../src/watcher.h

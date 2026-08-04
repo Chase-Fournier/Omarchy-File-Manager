@@ -32,11 +32,15 @@ Item {
         { keys: ["Shift+Up"],         label: "Extend selection up",  action: () => app.extendSelection(-1) },
         { keys: ["Ctrl+A"],           label: "Select all",           action: () => Dir.selectAll() },
 
-        // Super+C/X/V is the Omarchy convention Nautilus cannot do (§1); Ctrl is kept
-        // alongside it for muscle memory, exactly as §5 specifies.
-        { keys: ["Meta+C", "Ctrl+C"], label: "Copy",                 action: () => app.copy() },
-        { keys: ["Meta+X", "Ctrl+X"], label: "Cut",                  action: () => app.cut() },
-        { keys: ["Meta+V", "Ctrl+V"], label: "Paste",                action: () => app.paste() },
+        // Super+C/X/V is the Omarchy convention Nautilus cannot do (§1) — but Hyprland
+        // grabs those combos globally and re-sends the *terminal-safe* sequences to the
+        // active window, so an app never sees Super at all:
+        //     Super+C -> Ctrl+Insert     Super+V -> Shift+Insert     Super+X -> Ctrl+X
+        // Binding Ctrl+Insert and Shift+Insert is therefore what actually implements the
+        // convention. Ctrl+C/V stay for muscle memory, per §5.
+        { keys: ["Ctrl+Ins", "Ctrl+C"],  label: "Copy",              action: () => app.copy() },
+        { keys: ["Shift+Ins", "Ctrl+V"], label: "Paste",             action: () => app.paste() },
+        { keys: ["Ctrl+X"],              label: "Cut",               action: () => app.cut() },
         { keys: ["Ctrl+Shift+C"],     label: "Copy absolute path",   action: () => app.copyPath() },
 
         { keys: ["F2", "Ctrl+R"],     label: "Rename",               action: () => app.beginRename() },

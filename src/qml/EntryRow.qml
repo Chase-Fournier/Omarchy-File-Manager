@@ -51,47 +51,47 @@ Item {
 
         anchors.fill: parent
         acceptedButtons: Qt.LeftButton
+        // The ListView is a Flickable and will otherwise steal the press to scroll,
+        // which both turns a file drag into a scroll and kills the drag before it starts.
+        // Dragging a row means dragging the file; the wheel scrolls.
+        preventStealing: true
+
+        property point pressPoint
+        property bool dragStarted: false
+
+        onPressed: function (event) {
+            pressPoint = Qt.point(event.x, event.y)
+            dragStarted = false
+            app.prepareDrag(row.index, row.name, row.glyph)
+        }
+        onReleased: dragStarted = false
+
+        // The drag has to begin from the press that is still held, which is why it lives
+        // here rather than in a DragHandler: a handler alongside this MouseArea fights it
+        // for the grab and neither ends up owning the press.
+        onPositionChanged: function (event) {
+            if (!pressed || dragStarted)
+                return
+            if (Math.abs(event.x - pressPoint.x) < 8 && Math.abs(event.y - pressPoint.y) < 8)
+                return
+            dragStarted = true
+            app.requestDrag(row.index, row.name)
+        }
+
         onClicked: function (event) {
-            if (event.modifiers & Qt.ControlModifier)
+            if (event.modifiers & Qt.ShiftModifier) {
+                Dir.selectTo(row.index)
+                return
+            }
+            if (event.modifiers & Qt.ControlModifier) {
                 Dir.toggleSelection(row.index)
-            else
-                Dir.clearSelection()
+                Dir.currentIndex = row.index
+                return
+            }
+            Dir.clearSelection()
             Dir.currentIndex = row.index
         }
         onDoubleClicked: Dir.activate(row.index)
-    }
-
-    // ── Drag out (§7) ────────────────────────────────────────────────
-    // text/uri-list is what Chrome, Slack, GIMP and every GTK app read; text/plain is
-    // for terminals and text fields. A multi-select drag carries every selected path.
-    Item {
-        id: dragSource
-
-        anchors.fill: parent
-
-        Drag.active: dragHandler.active
-        Drag.dragType: Drag.Automatic
-        Drag.supportedActions: Qt.CopyAction | Qt.MoveAction
-        Drag.mimeData: {
-            const paths = app.dragPaths(row.index)
-            return {
-                "text/uri-list": paths.map(p => "file://" + encodeURI(p)).join("\r\n"),
-                "text/plain": paths.join("\n")
-            }
-        }
-
-        DragHandler {
-            id: dragHandler
-
-            // Well above the click slop, so click-to-select never turns into a drag.
-            dragThreshold: 8
-            onActiveChanged: {
-                if (active)
-                    dragSource.Drag.start()
-                else
-                    dragSource.Drag.drop()
-            }
-        }
     }
 
     Text {

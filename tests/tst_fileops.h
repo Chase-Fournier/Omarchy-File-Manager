@@ -44,6 +44,7 @@ private slots:
     void undoReversesAMove();
     void undoTrashesCopies();
     void permanentDeleteIsNotUndoable();
+    void uriListEncodesAwkwardPaths();
 
 private:
     QString path(const QString &relative) const;

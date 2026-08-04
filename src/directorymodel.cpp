@@ -302,6 +302,11 @@ void DirectoryModel::onFinished(quint64 generation, int)
 
     restoreCurrentByName(keepName);
 
+    if (!m_pendingSelectNames.isEmpty()) {
+        applySelectNames(m_pendingSelectNames);
+        m_pendingSelectNames.clear();
+    }
+
     // Size and time sorting cannot be done from d_type alone.
     if (m_sortMode != SortName)
         requestAllStats();
@@ -599,7 +604,14 @@ void DirectoryModel::setSortReversed(bool reversed)
 
 void DirectoryModel::setCurrentIndex(int index)
 {
+    setCurrent(index, true);
+}
+
+void DirectoryModel::setCurrent(int index, bool resetAnchor)
+{
     const int clamped = m_rows.isEmpty() ? -1 : qBound(0, index, count() - 1);
+    if (resetAnchor)
+        m_anchor = clamped;
     if (clamped == m_currentIndex)
         return;
     m_currentIndex = clamped;
@@ -824,17 +836,61 @@ void DirectoryModel::extendSelection(int delta)
 {
     if (m_rows.isEmpty())
         return;
-
     const int from = m_currentIndex < 0 ? 0 : m_currentIndex;
-    const int to = qBound(0, from + delta, count() - 1);
+    selectTo(qBound(0, from + delta, count() - 1));
+}
 
-    // Both ends are taken in, so the first Shift+Down selects the row you were on as
-    // well as the one you land on.
-    m_selected.insert(m_rows.at(from).entry.name);
-    m_selected.insert(m_rows.at(to).entry.name);
+// Selects the whole run between the anchor and `row`, which is what both Shift+click and
+// Shift+arrow mean. Anything selected outside that run is left alone, so a range can be
+// added to an existing Ctrl+click selection.
+void DirectoryModel::selectTo(int row)
+{
+    if (m_rows.isEmpty())
+        return;
 
-    setCurrentIndex(to);
-    emit dataChanged(index(qMin(from, to)), index(qMax(from, to)), { IsSelectedRole });
+    const int target = qBound(0, row, count() - 1);
+    if (m_anchor < 0 || m_anchor >= count())
+        m_anchor = m_currentIndex < 0 ? target : m_currentIndex;
+
+    const int first = qMin(m_anchor, target);
+    const int last = qMax(m_anchor, target);
+    for (int i = first; i <= last; ++i)
+        m_selected.insert(m_rows.at(i).entry.name);
+
+    setCurrent(target, false);
+    emit dataChanged(index(first), index(last), { IsSelectedRole });
+    emit selectionChanged();
+}
+
+void DirectoryModel::selectNames(const QStringList &names)
+{
+    if (names.isEmpty())
+        return;
+    if (m_loading) {
+        m_pendingSelectNames = names;
+        return;
+    }
+    applySelectNames(names);
+}
+
+void DirectoryModel::applySelectNames(const QStringList &names)
+{
+    if (names.isEmpty() || m_rows.isEmpty())
+        return;
+
+    m_selected.clear();
+    int firstRow = -1;
+    for (int i = 0; i < m_rows.size(); ++i) {
+        if (!names.contains(m_rows.at(i).entry.name))
+            continue;
+        m_selected.insert(m_rows.at(i).entry.name);
+        if (firstRow < 0)
+            firstRow = i;
+    }
+
+    if (firstRow >= 0)
+        setCurrent(firstRow, true);
+    emit dataChanged(index(0), index(count() - 1), { IsSelectedRole });
     emit selectionChanged();
 }
 

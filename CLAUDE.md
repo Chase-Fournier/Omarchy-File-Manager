@@ -161,6 +161,66 @@ colour and the selected-row tint are both computed rather than taken literally, 
 rename field's selection colour is deliberately *not* the row tint — on the row being
 renamed those are the same colour, which made an active edit field look like ordinary text.
 
+**Omarchy's universal clipboard does not send Ctrl+C.** Hyprland grabs Super+C/V/X
+globally and re-sends the *terminal-safe* sequences to the active window:
+
+    Super+C -> Ctrl+Insert      Super+V -> Shift+Insert      Super+X -> Ctrl+X
+
+So an application never sees Super at all, and binding `Meta+C` — which is what omafile
+did — can never fire. Binding `Ctrl+Insert`/`Shift+Insert` is what actually implements
+§1's "the Omarchy convention Nautilus can't do"; presumably not handling those is exactly
+why Nautilus can't. Check with `hyprctl binds | grep -A6 'modmask: 64'` before assuming
+any Super binding reaches the app.
+
+**Drag-out was broken four ways at once** (reported from real use, after M2 "shipped"):
+`Drag.start()` is the *internal*-drag API and never reaches another application —
+`Drag.startDrag()` is the one that creates a platform drag; there was no
+`Drag.imageSource`, so nothing appeared under the cursor; a `DragHandler` sat alongside
+the row's `MouseArea` and the two fought over the press so neither owned it; and the
+uri-list was built with JavaScript's `encodeURI`, which leaves `#` and `?` unescaped and
+silently truncates such paths in the receiving app. The drag now starts from the
+`MouseArea` that already holds the press, after an 8 px threshold, and the cursor image
+comes from `grabToImage` on the row — started from inside that callback, because the grab
+lands a frame later and starting before it leaves nothing attached to the pointer. The URI
+list is built in C++ (`Operations::uriList`) and unit-tested against `#`, `?`, `%`, spaces.
+
+**A `DropArea` declared inside a `ListView` lands in the wrong place.** A ListView is a
+Flickable, so declared visual children are parented to its `contentItem` — which is sized
+to the *content*, not the viewport, and moves as you scroll. `anchors.fill: parent` there
+fills the scrolling content, leaving the drop target somewhere other than where the list
+appears. The DropArea and the empty-state label are now siblings anchored to the list.
+Verified by forcing the drop highlight visible and confirming it spans the viewport.
+
+**The row's MouseArea sets `preventStealing: true`.** Without it the Flickable steals the
+press, which both scrolled the list when you meant to drag a file and killed the drag
+before it could start. In a file manager, dragging a row means dragging the file; the
+wheel scrolls.
+
+**`Drag.startDrag()` needs `Drag.active = true` first.** With `Drag.Automatic`, setting
+`active` only *arms* the drag; `startDrag()` executes it and refuses outright ("startDrag()
+drag must be active") if it was never armed. Both lines, in that order, or nothing ever
+attaches to the cursor.
+
+**The drag source lives at window level, never in the delegate.** `startDrag()` spins a
+nested event loop; an internal drop refreshes the model; the ListView then destroys the
+delegate the loop is about to return into. That crashed the app on every internal drag.
+The proxy item and the drag image now belong to the window, which outlives any row.
+
+**The drag image is a composed badge, not the row.** A row is the full width of the
+window, so grabbing it produced a drag image spanning the screen. The badge is built
+off-screen and sized from `TextMetrics` rather than from its laid-out `Row` width —
+layout has not run at prepare time, so reading the child's width there yields a 24 px
+sliver. `Qt.callLater` is *not* late enough to dodge that; only measuring the text is.
+
+**An operation's results end up selected.** What was produced is derived from the journal
+entry rather than guessed before the operation runs, so a file that conflict-resolution
+renamed to `foo (2).txt` is still the one selected afterwards.
+
+**Range selection is anchor-based.** `Shift+click` and `Shift+Up/Down` both select the run
+between the anchor and the cursor; plain moves reset the anchor, extending moves
+deliberately do not, so `Shift+Down Down Down` grows one run instead of toggling pairs.
+Ranges add to an existing `Ctrl+click` selection rather than replacing it.
+
 **Window close is blocked while an operation runs** (§8's "dead simple wins"), rather than
 detaching the operation.
 
@@ -175,12 +235,12 @@ should be restated as private memory — in which case we are comfortably inside
 whether it really means RSS, which may be unreachable for any Qt Quick app on this stack.
 Don't optimize until that is settled.
 
-**Drag and drop is implemented but not verified against real apps.** §7 is explicit that it
-must be tested against a GTK app, an Electron app and a Chromium tab, and calls that a
-release-checklist item rather than a test. None of that has been done. The drag-out side
-uses `Drag.Automatic` with `text/uri-list` + `text/plain`; the drop side handles
-`hasUrls`, Ctrl/Shift modifiers and 300 ms spring-loading. All of it is currently
-**unproven outside omafile itself**.
+**Drag-out works** (confirmed in real use): out to external applications, and internally
+without crashing. What is still unverified is §7's release checklist proper — a GTK app,
+an Electron app and a Chromium tab specifically — and drops *into* omafile from each.
+
+**The multi-select drag image is a count badge, not §7's stack of rows.** A multi-file
+drag reads "12 items" rather than showing overlapping row thumbnails.
 
 **Cross-filesystem copy (the `EXDEV` path) has no test.** It needs a second filesystem to
 exercise; the same-filesystem `rename(2)` path is covered and verified by inode.
