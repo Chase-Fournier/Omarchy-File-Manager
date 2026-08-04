@@ -27,6 +27,25 @@ Item {
         { keys: ["Shift+Return", "Shift+Enter"], label: "Open in new window", action: () => app.activateCurrentInNewWindow() },
         { keys: ["Left"],             label: "Parent directory",     action: () => app.goUp() },
 
+        { keys: ["Space"],            label: "Add to selection",     action: () => app.toggleSelection() },
+        { keys: ["Shift+Down"],       label: "Extend selection down", action: () => app.extendSelection(1) },
+        { keys: ["Shift+Up"],         label: "Extend selection up",  action: () => app.extendSelection(-1) },
+        { keys: ["Ctrl+A"],           label: "Select all",           action: () => Dir.selectAll() },
+
+        // Super+C/X/V is the Omarchy convention Nautilus cannot do (§1); Ctrl is kept
+        // alongside it for muscle memory, exactly as §5 specifies.
+        { keys: ["Meta+C", "Ctrl+C"], label: "Copy",                 action: () => app.copy() },
+        { keys: ["Meta+X", "Ctrl+X"], label: "Cut",                  action: () => app.cut() },
+        { keys: ["Meta+V", "Ctrl+V"], label: "Paste",                action: () => app.paste() },
+        { keys: ["Ctrl+Shift+C"],     label: "Copy absolute path",   action: () => app.copyPath() },
+
+        { keys: ["F2", "Ctrl+R"],     label: "Rename",               action: () => app.beginRename() },
+        { keys: ["Delete"],           label: "Move to trash",        action: () => app.trash() },
+        { keys: ["Shift+Delete"],     label: "Delete permanently",   action: () => app.confirmDelete() },
+        { keys: ["Ctrl+Z"],           label: "Undo",                 action: () => Ops.undo() },
+        { keys: ["Ctrl+Shift+N"],     label: "New folder",           action: () => app.promptNewFolder() },
+
+        { keys: ["Ctrl+T"],           label: "Terminal here",        action: () => app.openTerminal() },
         { keys: ["Ctrl+L"],           label: "Edit path",            action: () => app.beginPathEdit() },
         { keys: ["Ctrl+H"],           label: "Toggle hidden files",  action: () => app.toggleHidden() },
         { keys: ["Ctrl+N"],           label: "New window",           action: () => app.newWindow() },
@@ -44,7 +63,9 @@ Item {
         delegate: Shortcut {
             required property var modelData
             sequences: modelData.keys
-            enabled: !root.app.editingPath
+            // Anything modal owns the keyboard while it is up.
+            enabled: !root.app.editingPath && !root.app.overlayActive
+                     && root.app.renamingRow < 0
             onActivated: modelData.action()
         }
     }

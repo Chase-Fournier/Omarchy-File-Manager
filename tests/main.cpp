@@ -1,4 +1,5 @@
 #include "tst_directorymodel.h"
+#include "tst_fileops.h"
 #include "tst_formatting.h"
 #include "tst_location.h"
 #include "tst_theme.h"
@@ -62,6 +63,7 @@ int main(int argc, char *argv[])
     run(new TestLocation);
     run(new TestTheme);
     run(new TestDirectoryModel);
+    run(new TestFileOps);
 
     if (ran == 0) {
         qWarning("no suite contains %s", qPrintable(wanted.join(QLatin1String(", "))));

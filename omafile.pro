@@ -15,22 +15,32 @@ QMAKE_CXXFLAGS_RELEASE += -O2
 
 SOURCES += \
     src/main.cpp \
+    src/clipboard.cpp \
     src/directorymodel.cpp \
+    src/fileops.cpp \
     src/formatting.cpp \
+    src/journal.cpp \
     src/lister.cpp \
     src/location.cpp \
     src/opener.cpp \
+    src/operations.cpp \
     src/theme.cpp \
+    src/trash.cpp \
     src/watcher.cpp
 
 HEADERS += \
+    src/clipboard.h \
     src/directorymodel.h \
     src/entry.h \
+    src/fileops.h \
     src/formatting.h \
+    src/journal.h \
     src/lister.h \
     src/location.h \
     src/opener.h \
+    src/operations.h \
     src/theme.h \
+    src/trash.h \
     src/watcher.h
 
 RESOURCES += src/resources.qrc

@@ -132,6 +132,7 @@ QHash<int, QByteArray> DirectoryModel::roleNames() const
         { IsDirRole, "isDir" },
         { IsHiddenRole, "isHidden" },
         { IsBrokenRole, "isBroken" },
+        { IsSelectedRole, "isSelected" },
         { SizeTextRole, "sizeText" },
         { TimeTextRole, "timeText" },
         { MatchStartRole, "matchStart" },
@@ -158,6 +159,8 @@ QVariant DirectoryModel::data(const QModelIndex &index, int role) const
         return entry.isHidden();
     case IsBrokenRole:
         return entry.isBrokenSymlink();
+    case IsSelectedRole:
+        return m_selected.contains(entry.name);
     case SizeTextRole:
         // Directories have a size on disk, but it means nothing to a user reading a list.
         if (entry.isDir() || !entry.statted)
@@ -192,6 +195,9 @@ void DirectoryModel::setLocation(const Location &location)
 
     m_currentIndex = -1;
     emit currentIndexChanged();
+
+    m_selected.clear();
+    emit selectionChanged();
 
     startListing(false);
 }
@@ -275,6 +281,20 @@ void DirectoryModel::onFinished(quint64 generation, int)
         applyRows(buildRows());
     else
         resetRows();
+
+    // Drop selected names that no longer exist, or a trashed file would keep haunting
+    // the count in the status bar.
+    if (!m_selected.isEmpty()) {
+        const int before = int(m_selected.size());
+        QSet<QString> surviving;
+        for (const Entry &entry : m_all) {
+            if (m_selected.contains(entry.name))
+                surviving.insert(entry.name);
+        }
+        m_selected = std::move(surviving);
+        if (int(m_selected.size()) != before)
+            emit selectionChanged();
+    }
 
     m_diffPending = false;
     setLoading(false);
@@ -758,6 +778,94 @@ bool DirectoryModel::rowIsDir(int row) const
     if (row < 0 || row >= m_rows.size())
         return false;
     return m_rows.at(row).entry.isDir();
+}
+
+void DirectoryModel::toggleSelection(int row)
+{
+    if (row < 0 || row >= m_rows.size())
+        return;
+
+    const QString &name = m_rows.at(row).entry.name;
+    if (m_selected.contains(name))
+        m_selected.remove(name);
+    else
+        m_selected.insert(name);
+
+    const QModelIndex changed = index(row);
+    emit dataChanged(changed, changed, { IsSelectedRole });
+    emit selectionChanged();
+}
+
+void DirectoryModel::selectAll()
+{
+    if (m_rows.isEmpty())
+        return;
+
+    m_selected.clear();
+    for (const Row &row : m_rows)
+        m_selected.insert(row.entry.name);
+
+    emit dataChanged(index(0), index(count() - 1), { IsSelectedRole });
+    emit selectionChanged();
+}
+
+void DirectoryModel::clearSelection()
+{
+    if (m_selected.isEmpty())
+        return;
+
+    m_selected.clear();
+    if (!m_rows.isEmpty())
+        emit dataChanged(index(0), index(count() - 1), { IsSelectedRole });
+    emit selectionChanged();
+}
+
+void DirectoryModel::extendSelection(int delta)
+{
+    if (m_rows.isEmpty())
+        return;
+
+    const int from = m_currentIndex < 0 ? 0 : m_currentIndex;
+    const int to = qBound(0, from + delta, count() - 1);
+
+    // Both ends are taken in, so the first Shift+Down selects the row you were on as
+    // well as the one you land on.
+    m_selected.insert(m_rows.at(from).entry.name);
+    m_selected.insert(m_rows.at(to).entry.name);
+
+    setCurrentIndex(to);
+    emit dataChanged(index(qMin(from, to)), index(qMax(from, to)), { IsSelectedRole });
+    emit selectionChanged();
+}
+
+QStringList DirectoryModel::actionNames() const
+{
+    QStringList names;
+
+    if (!m_selected.isEmpty()) {
+        // Return them in view order, not hash order, so "Trashed 3 items" reads sensibly
+        // and undo unwinds in a predictable sequence.
+        for (const Row &row : m_rows) {
+            if (m_selected.contains(row.entry.name))
+                names.append(row.entry.name);
+        }
+        return names;
+    }
+
+    const QString current = currentName();
+    if (!current.isEmpty())
+        names.append(current);
+    return names;
+}
+
+QStringList DirectoryModel::actionPaths() const
+{
+    QStringList paths;
+    const QStringList names = actionNames();
+    paths.reserve(names.size());
+    for (const QString &name : names)
+        paths.append(m_location.child(name).localPath());
+    return paths;
 }
 
 void DirectoryModel::cycleSort()

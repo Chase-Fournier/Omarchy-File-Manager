@@ -40,6 +40,7 @@ class DirectoryModel : public QAbstractListModel
     Q_PROPERTY(int currentIndex READ currentIndex WRITE setCurrentIndex NOTIFY currentIndexChanged)
     Q_PROPERTY(QString currentName READ currentName NOTIFY currentIndexChanged)
     Q_PROPERTY(QString currentSizeText READ currentSizeText NOTIFY currentIndexChanged)
+    Q_PROPERTY(int selectionCount READ selectionCount NOTIFY selectionChanged)
 
 public:
     enum SortMode { SortName, SortSize, SortTime };
@@ -51,6 +52,7 @@ public:
         IsDirRole,
         IsHiddenRole,
         IsBrokenRole,
+        IsSelectedRole,
         SizeTextRole,
         TimeTextRole,
         MatchStartRole,
@@ -113,6 +115,20 @@ public:
     Q_INVOKABLE bool rowIsDir(int row) const;
     Q_INVOKABLE void cycleSort();
 
+    // Selection. Tracked by name rather than row so it survives a watcher diff, a filter
+    // change, and a re-sort.
+    int selectionCount() const { return int(m_selected.size()); }
+    Q_INVOKABLE void toggleSelection(int row);
+    Q_INVOKABLE void selectAll();
+    Q_INVOKABLE void clearSelection();
+    // Shift+Up/Down: move the cursor and take everything it passes over with it.
+    Q_INVOKABLE void extendSelection(int delta);
+
+    // What an operation should act on: the explicit selection, or the current row when
+    // nothing is explicitly selected. Every verb in the UI goes through this.
+    Q_INVOKABLE QStringList actionPaths() const;
+    Q_INVOKABLE QStringList actionNames() const;
+
 signals:
     void locationChanged();
     void countsChanged();
@@ -122,6 +138,7 @@ signals:
     void showHiddenChanged();
     void sortChanged();
     void currentIndexChanged();
+    void selectionChanged();
 
 private slots:
     void onBatch(quint64 generation, const QList<Entry> &entries);
@@ -171,6 +188,8 @@ private:
 
     // Set by goParent so the directory just left is selected once the listing lands.
     QString m_pendingSelect;
+
+    QSet<QString> m_selected;
 
     QThread m_thread;
     Lister *m_lister = nullptr;

@@ -2,5 +2,7 @@
     <qresource prefix="/">
         <file>qml/Main.qml</file>
         <file>qml/Shortcuts.qml</file>
+        <file>qml/EntryRow.qml</file>
+        <file>qml/Overlay.qml</file>
     </qresource>
 </RCC>
