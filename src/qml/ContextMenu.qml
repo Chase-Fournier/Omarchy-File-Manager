@@ -74,11 +74,18 @@ FocusScope {
         event.accepted = true
     }
 
-    // Clicking anywhere else dismisses, which is the one behaviour every menu has.
+    // Clicking anywhere else dismisses — and the click still does whatever it came to do.
+    // A menu that only eats the click costs two clicks for every one you meant, and the
+    // second one is the price of a stray right-click, which should be free.
     MouseArea {
         anchors.fill: parent
         acceptedButtons: Qt.LeftButton | Qt.RightButton
-        onClicked: menu.close()
+        onPressed: function (event) {
+            menu.close()
+            // Declining the press hands it on to whatever is underneath: a row selects, a
+            // crumb navigates, and another right-click opens the menu there instead.
+            event.accepted = false
+        }
     }
 
     Rectangle {
@@ -98,6 +105,14 @@ FocusScope {
         color: app.panelBg
         border.width: 1
         border.color: Theme.muted
+
+        // The panel's own padding and separators are still the menu. A click there should
+        // do nothing at all rather than fall through to the list behind it, which is what
+        // the pass-through above would otherwise give it.
+        MouseArea {
+            anchors.fill: parent
+            acceptedButtons: Qt.LeftButton | Qt.RightButton
+        }
 
         // Measures the widest label without laying it out, so the panel is exactly as
         // wide as it needs to be.

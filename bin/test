@@ -17,8 +17,12 @@ cd "$(dirname "$0")/.."
 # Startup is measured *before* the suite, not after. The search budget test writes and
 # then deletes a 100k-file tree, and measuring cold start while the kernel is still
 # working through that produced a phantom 60 ms regression and 600 ms outliers.
+#
+# It is also measured after a settle, and after a discarded warm-up run, because the
+# `make -j` above is the same hazard from the other side: sampling straight out of a
+# saturating compile reads 175 ms where the same binary reads 100 ms a few seconds later.
 measure_startup() {
-  local budget_ms=160
+  local budget_ms=140
   local samples=()
   local reading
 
@@ -26,6 +30,9 @@ measure_startup() {
     echo "SKIP  : startup budget (no display)"
     return 0
   fi
+
+  sleep 5
+  OMAFILE_TRACE_STARTUP=quit timeout 20 ./build/omafile >/dev/null 2>&1 || true
 
   for _ in {1..11}; do
     reading=$(OMAFILE_TRACE_STARTUP=quit timeout 20 ./build/omafile 2>/dev/null | awk '/^startup_ms/ {print $2}')

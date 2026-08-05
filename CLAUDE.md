@@ -21,6 +21,26 @@ OMAFILE_TRACE_STARTUP=quit ./build/omafile   # print ms to first paint and exit
 journald here. Use `console.warn` plus `QT_ASSUME_STDERR_HAS_CONSOLE=1`, or read
 `journalctl --user | grep omafile`.
 
+**Driving the pointer.** There is no `ydotool`/`wtype`/`dotool` here, and `hyprctl
+dispatch sendshortcut` covers keys but not buttons — so clicks are injected through
+`/dev/uinput`, which is writable by the `input` group without root. Three things had to be
+right before any of it was trustworthy, and each one first looked like an application bug:
+
+- **One device for the whole session.** Created and destroyed per click, roughly half the
+  clicks vanish: the compositor has not finished setting the device up before the button
+  arrives. Create it once, feed it commands on stdin.
+- **Nudge before pressing.** A pointer that has never moved has no surface focus, so its
+  first button goes nowhere. One pixel out and back is enough.
+- **Wait for the old window to die before launching the new one.** Two omafile windows get
+  tiled, every hardcoded coordinate then points somewhere else entirely, and the failures
+  look exactly like a broken feature. Poll `hyprctl clients` to zero, then to one, and
+  derive coordinates from the window's real geometry.
+
+Even then, read a "nothing happened" carefully: it also means *the click landed on
+something that does not log*. Probe every surface under test with `console.warn` before
+concluding a click was lost — and remember the preview pane occupies the right of the
+list, so a coordinate that looks like it is over a row may not be.
+
 ## Layout
 
 ```
@@ -93,7 +113,7 @@ staged tree; `desktop-file-validate` passes with no warnings.
 
 | Budget | Target | Actual |
 |---|---|---|
-| Cold start to first paint | < 160 ms | **104 ms** median idle, ~130 ms loaded |
+| Cold start to first paint | < 140 ms | **100 ms** median (13 runs) |
 | 10k-entry directory, complete | < 150 ms | **7 ms** |
 | Keystroke → filtered list | < 5 ms | **1 ms** (fuzzy, 10k entries) |
 | First search result (§6) | < 30 ms | **3 ms** |
@@ -102,7 +122,9 @@ staged tree; `desktop-file-validate` passes with no warnings.
 
 ### Right-click menus ✅ (post-M6, requested)
 Three menus, all in `src/qml/ContextMenu.qml`: one for a row, one for blank space, one for
-a sidebar place. Verified by screenshot; `FileOps::makeFile` is covered by
+a sidebar place — the blank-space menu also answers the strip beside the breadcrumb.
+Dismissing passes the click through to whatever it hit. All four surfaces are verified
+with real injected clicks, not just screenshots; `FileOps::makeFile` is covered by
 `tst_fileops::newFileNeverTruncates`. 197 tests pass.
 
 ---
@@ -143,6 +165,17 @@ segment ends and never swallows a right-click meant for a crumb — verified by 
 steady state, because at construction the breadcrumb has no width yet and the strip
 momentarily spans the whole header. It is hidden while `Ctrl+L` has the path open for
 editing, since the field covers that strip and the click belongs to the field.
+
+**Dismissing does the click as well as closing.** A click outside the menu closes it *and*
+still lands on whatever it hit: a row selects, another right-click opens the menu there
+instead. The dismissal `MouseArea` declines the press — `event.accepted = false` inside
+`onPressed`, not `onClicked` — which hands it to the item underneath. Only `onPressed` can
+do this; by `clicked` the event is already composed and there is nobody left to give it to.
+The panel carries its own `MouseArea` so that a click on its padding or a separator is
+swallowed rather than falling through to the list behind it.
+
+The alternative — eating the click — charges two clicks for every one you meant, and makes
+a stray right-click cost something. Verified with real clicks in both directions.
 
 **Two QML traps this hit, both worth remembering:**
 
@@ -641,33 +674,36 @@ It cost most of an afternoon chasing phantom bugs: several "broken" features wer
 working once the dispatch actually arrived, and F2 and Ctrl+1 never arrive at all. Do not
 trust it as evidence that something is broken; confirm with logging before believing it.
 
-**The startup budget was raised from 120 ms to 160 ms** (§12, `bin/test`, `README.md`) at
-the user's request, after `bin/test` began failing it about half the time. Do not read the
-new number as 40 ms of slack for the code — read it as the width of the measurement.
-Medians of 11–15 samples taken minutes apart on the same binary: **104, 119, 123, 132,
-148 ms**, with individual outliers to 580 ms whenever something else grabbed the CPU. An
-idle bench says 104; this machine's ordinary working state (Chrome, an editor, a language
-server, load ~2.2) says 120–150. 140 was tried first and still flapped, so it is 160: a
-budget that fails half the time on a machine doing nothing wrong teaches you to ignore it,
-which is worse than not having one.
+**The startup budget is 140 ms** (§12, `bin/test`, `README.md`), raised from 120 at the
+user's request — but the raise was the smaller half of the fix. `bin/test` was failing
+about half the time, and chasing that turned up a flaw in the harness rather than in the
+code: **startup was being sampled straight out of `make -j$(nproc)`**. The comment at the
+top of `measure_startup` already warned about exactly this hazard from the other side (the
+100k-file tree the search test writes), and the build immediately above it was doing the
+same thing unremarked. Same binary, seconds apart: `bin/test` read a median of **175 ms**
+while a manual loop read **100 ms**.
 
-What that buys is a regression test that only fires on a real regression. It does not
-excuse the creep — 86 ms at M0 to ~104 ms idle now — and profiling what is constructed
-before first paint is still the honest fix. Judge that on a settled machine only.
+So `measure_startup` now settles for five seconds and throws away one warm-up run before
+sampling, and the budget sits at 140 with the measurement honest — median **99 ms**, and a
+number that would actually notice a regression. 160 was tried first, purely to out-wait
+the noise; once the noise had a cause, that was no longer necessary.
 
-**No right-click has been synthesized — only the menus' rendering was verified.** There is
-no `ydotool`/`wtype`/`dotool` on this machine, so all three menus were opened by
-temporarily rebinding F1 to `menuForRow`/`menuForBlankSpace`/`menuForPlace` and
-screenshotting. That proves the panels build, size, populate and grey out the right rows.
-What it does not prove is the plumbing that gets there: `EntryRow`'s right-button branch,
-the blank-space `MouseArea` declared *before* the ListView, the strip beside the
-breadcrumb, and `Sidebar`'s place handler — including whether the click coordinates land
-where the pointer is. Right-click each of those four surfaces once by hand.
+The creep is still real — 86 ms at M0, ~100 ms now — and profiling what is constructed
+before first paint is still the honest fix. Judge it on a settled machine: the same binary
+reads 100 ms idle and 175 ms under a compile.
 
-**The menu actions have not been clicked.** Their callees are all confirmed to exist and be
-`Q_INVOKABLE`, and each one is a verb that already works from the keyboard, but the
-arrow functions are lazy — an argument-order mistake inside one would not surface until
-that row is chosen. "New file" is the one exception, now covered headlessly.
+**~~No right-click has been synthesized.~~ All four surfaces are now driven by real
+clicks** — see "Driving the pointer" above. Verified: right-click on a row, on blank space,
+on the strip beside the breadcrumb, and on a sidebar place; left- and right-click
+pass-through while a menu is open; clicks on the panel itself being swallowed; and a menu
+*action* running end to end ("Copy path" on `src` put `/home/warforged/Projects/Omafile/src`
+on the clipboard).
+
+**The other menu actions still have not been clicked.** Their callees are all confirmed to
+exist and be `Q_INVOKABLE`, each is a verb that already works from the keyboard, and the
+one that was exercised worked — but the arrow functions are lazy, so an argument-order
+mistake inside one would not surface until that row is chosen. "New file" is covered
+headlessly by a test; the rest are covered by inspection only.
 
 **§16.3 is still open.** `Space` toggles selection (launcher-like) rather than extending
 it. The plan says try both for a week.

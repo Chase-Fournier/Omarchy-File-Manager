@@ -391,7 +391,7 @@ Treat these as tests, not aspirations. `bin/test` should fail if they regress.
 
 | Metric | Budget |
 |---|---|
-| Cold start to first paint | < 160 ms |
+| Cold start to first paint | < 140 ms |
 | Listing a 10k-entry directory | < 50 ms to first rows, < 150 ms complete |
 | Keystroke → filtered list | < 5 ms |
 | `Ctrl+F` → first result | < 30 ms |
@@ -435,7 +435,7 @@ Manual release checklist (not automated): drag out to Chrome, a GTK app, and an 
 
 ## 15. Milestones
 
-**M0 — Skeleton (½ day).** Repo laid out like omacut, `omafile.pro`, `bin/build`, a themed empty window that opens in under 160 ms. Prove the startup budget before writing anything else; it's much harder to recover later.
+**M0 — Skeleton (½ day).** Repo laid out like omacut, `omafile.pro`, `bin/build`, a themed empty window that opens in under 140 ms. Prove the startup budget before writing anything else; it's much harder to recover later.
 
 **M1 — Browse.** `Lister`, `DirectoryModel`, `Watcher`, breadcrumb, status bar, keyboard navigation, type-to-filter, `Enter`/`xdg-open`, hidden files, sorting. **This is the point where it replaces Nautilus for reading.** Ship it to yourself here and use it daily.
 
