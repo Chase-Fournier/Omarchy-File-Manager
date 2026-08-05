@@ -773,8 +773,16 @@ void Places::eject(int row)
     const QString path = place.mountPath.isEmpty() ? place.target : place.mountPath;
     QString error;
 
-    // FUSE mounts are ours to unmount; a udisks volume belongs to udisks.
-    if (path.startsWith(Mounts::runtimeMountRoot())) {
+    // Three owners, three commands. A gvfs share is not ours: unmounting it with
+    // fusermount3 would take down the whole gvfs bridge and every other share with it,
+    // and udisks has never heard of it.
+    if (Mounts::isGvfsShare(path)) {
+        if (Mounts::hasGio())
+            runCommand(QStringLiteral("gio"),
+                       { QStringLiteral("mount"), QStringLiteral("-u"), path }, 15000, &error);
+        else
+            error = QStringLiteral("gvfs is not installed");
+    } else if (path.startsWith(Mounts::runtimeMountRoot())) {
         runCommand(QStringLiteral("fusermount3"), { QStringLiteral("-u"), path }, 10000,
                    &error);
     } else if (Mounts::hasUdisks()) {

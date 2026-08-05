@@ -3,10 +3,13 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QHash>
+#include <QUrl>
 #include <QProcess>
 #include <QSet>
 #include <QStandardPaths>
 
+#include <dirent.h>
 #include <unistd.h>
 
 namespace {
@@ -55,6 +58,36 @@ bool looksRemovable(const QString &path)
         || path.startsWith(QLatin1String("/media/"));
 }
 
+// What gvfs currently holds, one entry per connected share.
+//
+// readdir and nothing else: no stat on the children. The listing itself is answered by
+// gvfsd out of its own table, but stat-ing a share would reach for the far end, and a
+// share whose server has gone away would then block the caller — which is the GUI thread.
+QList<MountPoint> gvfsShares()
+{
+    QList<MountPoint> shares;
+
+    DIR *dir = ::opendir(QFile::encodeName(Mounts::gvfsRoot()).constData());
+    if (!dir)
+        return shares;
+
+    while (const dirent *entry = ::readdir(dir)) {
+        const QString name = QFile::decodeName(entry->d_name);
+        if (name == QLatin1String(".") || name == QLatin1String(".."))
+            continue;
+
+        MountPoint share;
+        share.path = Mounts::gvfsRoot() + QLatin1Char('/') + name;
+        share.source = name;
+        share.fsType = QStringLiteral("fuse.gvfsd-fuse");
+        share.isNetwork = true;
+        share.displayName = Mounts::gvfsShareName(name);
+        shares.append(share);
+    }
+    ::closedir(dir);
+    return shares;
+}
+
 // mountinfo escapes these in paths, because a mount point may contain them.
 QString unescapeField(const QString &field)
 {
@@ -84,6 +117,8 @@ QString executable(const QString &name)
 
 QString MountPoint::label() const
 {
+    if (!displayName.isEmpty())
+        return displayName;
     const QString name = path.section(QLatin1Char('/'), -1);
     return name.isEmpty() ? path : name;
 }
@@ -132,6 +167,17 @@ QList<MountPoint> current()
     for (const MountPoint &mount : all) {
         if (isPseudoFs(mount.fsType))
             continue;
+
+        // The gvfs mount is a container, not a place. It is present whenever gvfsd-fuse
+        // is running and holds every share gvfs has as a subdirectory, so listing it
+        // gives one permanent entry called "gvfs" that points at an empty directory when
+        // nothing is connected, and still says only "gvfs" when something is. The shares
+        // inside it are the places, so those get listed instead.
+        if (mount.path == gvfsRoot()) {
+            interesting.append(gvfsShares());
+            continue;
+        }
+
         // A place is somewhere that is not simply part of this machine's own disk: a
         // share, a stick, or something FUSE put there.
         if (mount.isNetwork || mount.isRemovable
@@ -189,6 +235,56 @@ bool isOwnMountRoot(const QString &path)
             return true;
     }
     return false;
+}
+
+QString gvfsRoot()
+{
+    QString base = QString::fromLocal8Bit(qgetenv("XDG_RUNTIME_DIR"));
+    if (base.isEmpty())
+        base = QStringLiteral("/run/user/%1").arg(::getuid());
+    return base + QStringLiteral("/gvfs");
+}
+
+bool isGvfsShare(const QString &path)
+{
+    const QString root = gvfsRoot() + QLatin1Char('/');
+    return path.startsWith(root) && path.size() > root.size();
+}
+
+QString gvfsShareName(const QString &directoryName)
+{
+    // gvfs names a share by how to reach it: "smb-share:server=nas,share=media",
+    // "sftp:host=example.com,user=chase", "dav:host=x,ssl=true". Everything after the
+    // scheme is comma-separated key=value, percent-encoded.
+    const int colon = directoryName.indexOf(QLatin1Char(':'));
+    if (colon <= 0)
+        return directoryName;
+
+    QHash<QString, QString> fields;
+    const QStringList pairs =
+        directoryName.mid(colon + 1).split(QLatin1Char(','), Qt::SkipEmptyParts);
+    for (const QString &pair : pairs) {
+        const int equals = pair.indexOf(QLatin1Char('='));
+        if (equals <= 0)
+            continue;
+        fields.insert(pair.left(equals),
+                      QUrl::fromPercentEncoding(pair.mid(equals + 1).toUtf8()));
+    }
+
+    // What it is, then where it is: "media on nas" reads better than either alone, and
+    // is what the share is actually called in the places people already know.
+    const QString what = fields.value(QStringLiteral("share"),
+                                      fields.value(QStringLiteral("volume")));
+    const QString where = fields.value(QStringLiteral("server"),
+                                       fields.value(QStringLiteral("host")));
+
+    if (!what.isEmpty() && !where.isEmpty())
+        return QStringLiteral("%1 on %2").arg(what, where);
+    if (!what.isEmpty())
+        return what;
+    if (!where.isEmpty())
+        return where;
+    return directoryName;
 }
 
 QString runtimeMountRoot()

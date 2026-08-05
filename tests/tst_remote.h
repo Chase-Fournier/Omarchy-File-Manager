@@ -28,5 +28,9 @@ private slots:
     void unescapesMountPaths();
     void toleratesVariableOptionalFields();
 
+    void gvfsSharesAreNamedReadably();
+    void gvfsSharesAreRecognisedByPath();
+    void gvfsShareLabelIsNeverEmpty();
+
     void softDependenciesAreAnswerable();
 };

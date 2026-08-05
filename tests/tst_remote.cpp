@@ -295,3 +295,62 @@ void TestRemote::softDependenciesAreAnswerable()
     QVERIFY(Mounts::networkRootFor(QStringLiteral("/usr/share")).isEmpty());
     QVERIFY(Mounts::sshHostFor(QStringLiteral("/usr/share")).isEmpty());
 }
+
+// The gvfs mount is a container, not a place: gvfsd-fuse runs whenever a desktop has a
+// portal, so it is always mounted, and it showed up in the sidebar as a permanent entry
+// called "gvfs" pointing at an empty directory. Every share it holds is a subdirectory,
+// and those are the places.
+void TestRemote::gvfsSharesAreNamedReadably()
+{
+    // The spellings gvfs actually uses.
+    QCOMPARE(Mounts::gvfsShareName(QStringLiteral("smb-share:server=nas,share=media")),
+             QStringLiteral("media on nas"));
+    QCOMPARE(Mounts::gvfsShareName(QStringLiteral("sftp:host=example.com,user=chase")),
+             QStringLiteral("example.com"));
+    QCOMPARE(Mounts::gvfsShareName(QStringLiteral("dav:host=cloud.example.com,ssl=true")),
+             QStringLiteral("cloud.example.com"));
+    QCOMPARE(Mounts::gvfsShareName(QStringLiteral("afp-volume:host=mac,volume=Backups")),
+             QStringLiteral("Backups on mac"));
+
+    // Percent-encoding is gvfs's, not ours to show.
+    QCOMPARE(Mounts::gvfsShareName(QStringLiteral("smb-share:server=nas,share=My%20Files")),
+             QStringLiteral("My Files on nas"));
+
+    // Anything unrecognised is shown as-is rather than as an empty row.
+    QCOMPARE(Mounts::gvfsShareName(QStringLiteral("something-new")),
+             QStringLiteral("something-new"));
+    QCOMPARE(Mounts::gvfsShareName(QStringLiteral("mtp:host=%5Busb%3A001%2C002%5D")),
+             QStringLiteral("[usb:001,002]"));
+}
+
+// Which decides how it is unmounted: gvfs shares answer to `gio mount -u`, where
+// fusermount3 would take down the bridge and every other share with it.
+void TestRemote::gvfsSharesAreRecognisedByPath()
+{
+    const QString root = Mounts::gvfsRoot();
+    QVERIFY(root.endsWith(QStringLiteral("/gvfs")));
+
+    QVERIFY(Mounts::isGvfsShare(root + QStringLiteral("/smb-share:server=nas,share=media")));
+    QVERIFY(Mounts::isGvfsShare(root + QStringLiteral("/sftp:host=x/deeper/still")));
+
+    // The bridge itself is not a share, and neither is anything outside it.
+    QVERIFY(!Mounts::isGvfsShare(root));
+    QVERIFY(!Mounts::isGvfsShare(root + QStringLiteral("/")));
+    QVERIFY(!Mounts::isGvfsShare(QStringLiteral("/home/chase/gvfs/thing")));
+    QVERIFY(!Mounts::isGvfsShare(Mounts::runtimeMountRoot() + QStringLiteral("/oci")));
+}
+
+// A place has to have a name; a share whose directory name decodes to nothing would
+// otherwise be an invisible row.
+void TestRemote::gvfsShareLabelIsNeverEmpty()
+{
+    MountPoint share;
+    share.path = Mounts::gvfsRoot() + QStringLiteral("/smb-share:server=nas,share=media");
+    share.displayName = Mounts::gvfsShareName(QStringLiteral("smb-share:server=nas,share=media"));
+    QCOMPARE(share.label(), QStringLiteral("media on nas"));
+
+    // Without a display name it falls back to the last path component, as before.
+    MountPoint ordinary;
+    ordinary.path = QStringLiteral("/run/media/chase/STICK");
+    QCOMPARE(ordinary.label(), QStringLiteral("STICK"));
+}

@@ -12,8 +12,11 @@ struct MountPoint
     QString fsType;
     bool isNetwork = false;
     bool isRemovable = false;
+    // Set for gvfs shares, whose directory name is a machine-readable description rather
+    // than anything worth showing. Empty for everything else.
+    QString displayName;
 
-    // What the sidebar shows: the volume label, or the last path component.
+    // What the sidebar shows: the display name, or the last path component.
     QString label() const;
 };
 
@@ -46,6 +49,24 @@ bool isOwnMountRoot(const QString &path);
 
 // Where omafile puts the mounts it owns: $XDG_RUNTIME_DIR/omafile/...
 QString runtimeMountRoot();
+
+// Where gvfs puts everything it has mounted: $XDG_RUNTIME_DIR/gvfs.
+//
+// This is a single FUSE mount that exists for as long as gvfsd-fuse is running — which,
+// on a desktop with a portal, is always — and every share gvfs holds is a *subdirectory*
+// of it rather than a mount of its own. So the mount itself is never a place: with
+// nothing connected it is an empty directory, and with something connected it is a
+// directory of them.
+QString gvfsRoot();
+
+// True for a path that is one of those subdirectories, which is what decides how it gets
+// unmounted: gvfs shares answer to `gio mount -u`, not to fusermount3 or udisks.
+bool isGvfsShare(const QString &path);
+
+// A readable name for one of those subdirectories, whose real name looks like
+// "smb-share:server=nas,share=media". Exposed so it can be tested against the real
+// spellings without needing anything mounted.
+QString gvfsShareName(const QString &directoryName);
 
 // Soft dependencies (§2), detected once and used to gray out rather than to fail.
 bool hasSshfs();

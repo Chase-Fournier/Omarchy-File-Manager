@@ -200,6 +200,33 @@ a stray right-click cost something. Verified with real clicks in both directions
   once the real size arrives. This is the same layout-timing class of bug as the drag badge
   and the Overlay focus grab — the third instance in this project.
 
+### The permanent "gvfs" row in the sidebar
+
+**`$XDG_RUNTIME_DIR/gvfs` is a container, not a place**, and it was being listed as a
+volume. `fuse.gvfsd-fuse` is in the network-filesystem list — correctly, because files
+under it *are* remote — but the mount itself is the FUSE bridge gvfsd exposes, present for
+as long as gvfsd-fuse is running, which on a desktop with a portal is always. Every share
+gvfs holds is a **subdirectory** of that one mount rather than a mount of its own, so
+`/proc/self/mountinfo` shows exactly one line no matter how many shares are connected.
+
+The result was a row called "gvfs" (from `label()` taking the last path component) that
+never went away and, with nothing connected, pointed at an empty directory. With something
+connected it still said only "gvfs".
+
+So the bridge is skipped and its children are listed instead, one row per share, named by
+decoding gvfs's own directory names — `smb-share:server=nas,share=media` becomes "media on
+nas". Unrecognised spellings are shown as-is rather than as an empty row.
+
+**Read with readdir and no stat.** Listing the bridge is answered by gvfsd from its own
+table, but stat-ing a share reaches for the far end, and a share whose server has gone
+away would block the caller — which here is the GUI thread.
+
+**Three owners, three unmount commands.** A gvfs share is not omafile's to unmount:
+`fusermount3` on it would take down the bridge and every other share with it, and udisks
+has never heard of it. `Places::eject` routes gvfs shares to `gio mount -u`, which is why
+`isGvfsShare` exists as a path test rather than being inferred from the filesystem type —
+the type is the same for the bridge and everything inside it.
+
 ### Pinning files as well as folders
 
 **A pin is a bookmark that also accepts a file**, which is most of why this needed any work
