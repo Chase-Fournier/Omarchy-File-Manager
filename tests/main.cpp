@@ -1,5 +1,6 @@
 #include "tst_bulkrename.h"
 #include "tst_directorymodel.h"
+#include "tst_filemanager1.h"
 #include "tst_fileops.h"
 #include "tst_formatting.h"
 #include "tst_fuzzyscorer.h"
@@ -75,6 +76,7 @@ int main(int argc, char *argv[])
     run(new TestTerminal);
     run(new TestTheme);
     run(new TestDirectoryModel);
+    run(new TestFileManager1);
     run(new TestFileOps);
     run(new TestSearch);
     run(new TestRemote);

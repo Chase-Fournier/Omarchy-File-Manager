@@ -200,6 +200,39 @@ a stray right-click cost something. Verified with real clicks in both directions
   once the real size arrives. This is the same layout-timing class of bug as the drag badge
   and the Overlay focus grab — the third instance in this project.
 
+### "Reveal in File Explorer" is not xdg-open
+
+**`org.freedesktop.FileManager1` is a third way of asking for a file manager**, and omafile
+answered none of it. VS Code's "Reveal in File Explorer" and Chromium's "Show in folder"
+make a D-Bus call to that well-known name; whoever owns it answers. Nautilus ships
+`/usr/share/dbus-1/services/org.freedesktop.FileManager1.service` with
+`Exec=/usr/bin/nautilus --gapplication-service`, so on any machine with Nautilus installed
+it wins — and neither `xdg-mime` nor the compositor's keybinding has any bearing on it.
+Confirmed by calling `ShowItems` by hand and watching Nautilus open.
+
+So there are three independent switches and setting one does not set the others:
+`xdg-mime` for anything that opens a folder, the compositor's binding for the key, and
+this for "reveal".
+
+**The service is a mode, not a startup cost.** `omafile --dbus-service` is started by D-Bus
+on demand, owns the name, and turns each call into an ordinary omafile process — §3's "a
+second window is a second process" applies here too, so it holds nothing and exits after
+30 seconds idle. An ordinary launch never touches D-Bus.
+
+**`QT += dbus` costs nothing** because `libQt6DBus` is already a load-time dependency of
+QtGui's platform integration. Measured before writing a line of code — 96 ms against
+95 ms — because this is exactly the mistake `quickcontrols2` was.
+
+**`ShowItems` is `--select`.** The interface's "show me this file" is the flag omafile
+already had, so the handler spawns `omafile --select <path>` and existing behaviour does
+the work.
+
+**The service file is installed by the user, not the package.** Two packages cannot own
+`/usr/share/dbus-1/services/org.freedesktop.FileManager1.service`, so taking it would mean
+conflicting with Nautilus. A copy in `~/.local/share/dbus-1/services/` takes precedence
+over the system one, so the package ships a template under `/usr/share/omafile/` and the
+README gives the one-line copy. Reversible with `rm`.
+
 ### The permanent "gvfs" row in the sidebar
 
 **`$XDG_RUNTIME_DIR/gvfs` is a container, not a place**, and it was being listed as a

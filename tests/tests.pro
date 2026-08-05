@@ -1,4 +1,4 @@
-QT += testlib gui
+QT += testlib gui dbus
 QT -= quick
 CONFIG += c++17 console
 CONFIG -= app_bundle debug_and_release
@@ -16,6 +16,7 @@ SOURCES += \
     main.cpp \
     tst_bulkrename.cpp \
     tst_directorymodel.cpp \
+    tst_filemanager1.cpp \
     tst_fileops.cpp \
     tst_formatting.cpp \
     tst_fuzzyscorer.cpp \
@@ -29,6 +30,7 @@ SOURCES += \
     tst_theme.cpp \
     ../src/bulkrename.cpp \
     ../src/directorymodel.cpp \
+    ../src/filemanager1.cpp \
     ../src/fileops.cpp \
     ../src/formatting.cpp \
     ../src/handlers.cpp \
@@ -53,6 +55,7 @@ SOURCES += \
 HEADERS += \
     tst_bulkrename.h \
     tst_directorymodel.h \
+    tst_filemanager1.h \
     tst_fileops.h \
     tst_formatting.h \
     tst_fuzzyscorer.h \
@@ -67,6 +70,7 @@ HEADERS += \
     ../src/bulkrename.h \
     ../src/directorymodel.h \
     ../src/entry.h \
+    ../src/filemanager1.h \
     ../src/fileops.h \
     ../src/formatting.h \
     ../src/handlers.h \

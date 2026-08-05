@@ -1,0 +1,11 @@
+# Copy to ~/.local/share/dbus-1/services/ to make omafile answer "reveal this file"
+# calls from other applications (VS Code, Chromium, and anything else using the
+# org.freedesktop.FileManager1 interface).
+#
+# It is deliberately NOT installed system-wide: /usr/share/dbus-1/services/ already holds
+# a file of this name from whichever file manager is installed, and two packages cannot
+# own the same path. A copy under $XDG_DATA_HOME takes precedence over the system one,
+# which makes this reversible by deleting a single file.
+[D-BUS Service]
+Name=org.freedesktop.FileManager1
+Exec=/usr/bin/omafile --dbus-service

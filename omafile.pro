@@ -2,7 +2,7 @@
 # QtQuick.Controls — ContextMenu.qml is written in plain QtQuick specifically to avoid it
 # (§12). Linking it anyway made libQt6QuickControls2 and libQt6QuickTemplates2 load-time
 # dependencies of every start, which is the one budget with no room in it.
-QT += quick
+QT += quick dbus
 CONFIG += c++17 qtquickcompiler
 CONFIG -= debug_and_release
 
@@ -22,6 +22,7 @@ SOURCES += \
     src/bulkrename.cpp \
     src/clipboard.cpp \
     src/directorymodel.cpp \
+    src/filemanager1.cpp \
     src/fileops.cpp \
     src/formatting.cpp \
     src/handlers.cpp \
@@ -49,6 +50,7 @@ HEADERS += \
     src/clipboard.h \
     src/directorymodel.h \
     src/entry.h \
+    src/filemanager1.h \
     src/fileops.h \
     src/formatting.h \
     src/handlers.h \

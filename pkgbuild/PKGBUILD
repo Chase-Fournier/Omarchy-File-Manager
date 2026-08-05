@@ -66,4 +66,10 @@ package() {
     "$pkgdir/usr/share/icons/hicolor/scalable/apps/omafile.svg"
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
   install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+
+  # Not into /usr/share/dbus-1/services: that path is already owned by whichever file
+  # manager is installed, and two packages cannot own the same file. It ships as a
+  # template the user copies into ~/.local/share/dbus-1/services/, which takes precedence.
+  install -Dm644 pkgbuild/org.freedesktop.FileManager1.service \
+    "$pkgdir/usr/share/omafile/org.freedesktop.FileManager1.service"
 }

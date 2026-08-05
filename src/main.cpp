@@ -2,6 +2,7 @@
 #include "operations.h"
 #include "places.h"
 #include "preview.h"
+#include "filemanager1.h"
 #include "settings.h"
 #include "previewimageprovider.h"
 #include "searchmodel.h"
@@ -92,6 +93,22 @@ int main(int argc, char *argv[])
     if (argc > 1 && (qstrcmp(argv[1], "--help") == 0 || qstrcmp(argv[1], "-h") == 0)) {
         printUsage();
         return 0;
+    }
+
+    // Started by D-Bus, never by a person: owns org.freedesktop.FileManager1 and turns
+    // "reveal this file" calls from other applications into ordinary omafile windows.
+    // No GUI here — it spawns processes and holds nothing — so it costs a QCoreApplication
+    // and nothing more.
+    if (argc > 1 && qstrcmp(argv[1], "--dbus-service") == 0) {
+        QCoreApplication service(argc, argv);
+        service.setApplicationName(QStringLiteral("omafile"));
+
+        FileManager1 fileManager;
+        if (!fileManager.registerService()) {
+            qWarning("omafile: org.freedesktop.FileManager1 is already owned; standing down");
+            return 1;
+        }
+        return service.exec();
     }
 
     QGuiApplication app(argc, argv);
