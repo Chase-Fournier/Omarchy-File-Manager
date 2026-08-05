@@ -1,0 +1,16 @@
+#!/bin/bash
+
+# Build, package and install omafile.
+
+set -e
+
+cd "$(dirname "$0")/.."
+
+./bin/build
+
+cd pkgbuild
+makepkg -fsi --noconfirm
+
+echo
+echo "Installed. To make every application open folders in omafile:"
+echo "  xdg-mime default omafile.desktop inode/directory"

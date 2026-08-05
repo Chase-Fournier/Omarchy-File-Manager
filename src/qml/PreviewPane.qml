@@ -62,9 +62,11 @@ Item {
             horizontalAlignment: Text.AlignHCenter
             wrapMode: Text.WordWrap
             visible: Preview.kind === Preview.Other || Preview.kind === Preview.Empty
+            // A directory answers with its item count in the detail line, so the middle
+            // of the pane stays empty rather than saying "no preview" beneath a number.
             text: Preview.loading ? "…"
-                 : Preview.kind === Preview.Other ? "no preview"
-                 : ""
+                 : (Preview.kind === Preview.Other && Preview.detail.indexOf("item") < 0)
+                   ? "no preview" : ""
             color: Theme.dim
             font.family: app.monoFamily
             font.pixelSize: app.fontSize - 1

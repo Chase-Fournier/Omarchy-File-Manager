@@ -180,6 +180,33 @@ void TestDirectoryModel::statsArriveOnlyForRequestedRows()
     QVERIFY(!roleAt(model, 0, DirectoryModel::TimeTextRole).isEmpty());
 }
 
+// Scrolling asks for stats on the newly visible rows. If their arrival re-announced the
+// current index, the view would scroll itself back to the selection every time a stat
+// landed — which is exactly what broke scrolling in practice. The cursor moving and the
+// cursor's row changing are different events and must stay different signals.
+void TestDirectoryModel::arrivingStatsDoNotMoveTheCursor()
+{
+    for (int i = 0; i < 40; ++i)
+        write(QStringLiteral("file-%1.txt").arg(i, 3, 10, QLatin1Char('0')));
+
+    DirectoryModel model;
+    model.setLocation(Location::fromLocalPath(m_dir.path()));
+    QVERIFY(waitForIdle(&model));
+    model.setCurrentIndex(5);
+
+    QSignalSpy cursorMoved(&model, &DirectoryModel::currentIndexChanged);
+    QSignalSpy detailsChanged(&model, &DirectoryModel::currentDetailsChanged);
+
+    // Stat a window that does not contain the cursor, as scrolling away from it would.
+    model.ensureStats(20, 39);
+    QVERIFY(detailsChanged.wait(5000));
+    QCoreApplication::processEvents();
+
+    QCOMPARE(model.currentIndex(), 5);   // the cursor has not moved
+    QCOMPARE(cursorMoved.count(), 0);    // and nothing said that it did
+    QVERIFY(detailsChanged.count() > 0); // the status bar still gets its update
+}
+
 // §14: anything that shells out breaks on these. omafile does not shell out to list,
 // which is exactly why they should keep working.
 void TestDirectoryModel::handlesAwkwardFilenames()

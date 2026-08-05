@@ -1,0 +1,45 @@
+name: build and test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    # Arch, because that is what Omarchy is and what the PKGBUILD targets. Building
+    # against the same Qt the users get is the point.
+    container: archlinux:latest
+
+    steps:
+      - name: Install dependencies
+        run: |
+          pacman -Syu --noconfirm \
+            base-devel git \
+            qt6-base qt6-declarative qt6-svg qt6-tools \
+            fd ripgrep
+
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: ./bin/build
+
+      - name: Test
+        # The suite runs under QCoreApplication and needs no display. It carries the §12
+        # and §6 performance budgets with it — a regression fails the build rather than
+        # being noticed months later.
+        run: |
+          cd tests
+          qmake6 tests.pro
+          make -j"$(nproc)"
+          cd ..
+          QT_QPA_PLATFORM=offscreen ./build/tests/tst_omafile
+
+      - name: Package
+        # Proves the PKGBUILD still installs what it claims to. makepkg refuses to run as
+        # root, so it gets its own user.
+        run: |
+          useradd -m builder
+          chown -R builder:builder .
+          su builder -c 'cd pkgbuild && makepkg -f --nodeps --noconfirm'
+          ls -la pkgbuild/*.pkg.tar.*

@@ -38,8 +38,11 @@ class DirectoryModel : public QAbstractListModel
     Q_PROPERTY(bool sortReversed READ sortReversed WRITE setSortReversed NOTIFY sortChanged)
 
     Q_PROPERTY(int currentIndex READ currentIndex WRITE setCurrentIndex NOTIFY currentIndexChanged)
-    Q_PROPERTY(QString currentName READ currentName NOTIFY currentIndexChanged)
-    Q_PROPERTY(QString currentSizeText READ currentSizeText NOTIFY currentIndexChanged)
+    // Notified by currentDetailsChanged, not currentIndexChanged: the size text also
+    // changes when a stat lands for the row already under the cursor, and conflating the
+    // two made every scroll snap the view back (see onStatsReady).
+    Q_PROPERTY(QString currentName READ currentName NOTIFY currentDetailsChanged)
+    Q_PROPERTY(QString currentSizeText READ currentSizeText NOTIFY currentDetailsChanged)
     Q_PROPERTY(int selectionCount READ selectionCount NOTIFY selectionChanged)
 
 public:
@@ -143,7 +146,10 @@ signals:
     void filterChanged();
     void showHiddenChanged();
     void sortChanged();
+    // The cursor moved to a different row. This is what scrolls the view.
     void currentIndexChanged();
+    // The current row's *contents* changed — a stat landed, say. Never scrolls anything.
+    void currentDetailsChanged();
     void selectionChanged();
 
 private slots:

@@ -199,6 +199,7 @@ void DirectoryModel::setLocation(const Location &location)
 
     m_currentIndex = -1;
     emit currentIndexChanged();
+    emit currentDetailsChanged();
 
     m_selected.clear();
     emit selectionChanged();
@@ -376,7 +377,10 @@ void DirectoryModel::onStatsReady(quint64 generation, int firstRow, const QList<
         restoreCurrentByName(keepName);
     }
 
-    emit currentIndexChanged(); // the status bar shows the current row's size
+    // Deliberately not currentIndexChanged: the cursor has not moved, only its row's
+    // details have. Emitting the index signal here made a stat arriving mid-scroll drag
+    // the view back to the selection, which broke scrolling outright.
+    emit currentDetailsChanged();
 }
 
 void DirectoryModel::onDirectoryChanged()
@@ -631,6 +635,7 @@ void DirectoryModel::setCurrent(int index, bool resetAnchor)
         return;
     m_currentIndex = clamped;
     emit currentIndexChanged();
+    emit currentDetailsChanged();
 }
 
 QString DirectoryModel::currentName() const

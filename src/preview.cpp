@@ -4,6 +4,8 @@
 #include "thumbnails.h"
 
 #include <QFile>
+#include <QDir>
+#include <QDirIterator>
 #include <QFileInfo>
 #include <QImageReader>
 #include <QMimeDatabase>
@@ -37,8 +39,27 @@ bool looksLikeText(const QByteArray &sample)
 void PreviewWorker::load(const QString &path, int maxWidth, int maxHeight, quint64 generation)
 {
     const QFileInfo info(path);
-    if (!info.exists() || info.isDir()) {
+    if (!info.exists()) {
         emit loaded(generation, Preview::Empty, QString(), QString(), QImage());
+        return;
+    }
+
+    // A directory has no preview, but a blank pane reads as a bug rather than as an
+    // answer. Counting is capped so a directory with a million entries cannot turn
+    // moving the cursor into a stall.
+    if (info.isDir()) {
+        constexpr int kCountCap = 10000;
+        int count = 0;
+        QDirIterator entries(path, QDir::AllEntries | QDir::Hidden | QDir::NoDotAndDotDot);
+        while (entries.hasNext() && count <= kCountCap) {
+            entries.next();
+            ++count;
+        }
+        const QString detail = count > kCountCap
+            ? QStringLiteral("%1+ items").arg(kCountCap)
+            : (count == 1 ? QStringLiteral("1 item")
+                          : QStringLiteral("%1 items").arg(count));
+        emit loaded(generation, Preview::Other, QString(), detail, QImage());
         return;
     }
 

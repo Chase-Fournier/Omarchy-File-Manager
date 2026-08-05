@@ -1,0 +1,20 @@
+[Desktop Entry]
+Type=Application
+Name=Omafile
+GenericName=File Manager
+Comment=Open a folder in a blink, find anything by typing, act on it without touching the mouse
+Exec=omafile %U
+Icon=omafile
+Terminal=false
+StartupNotify=true
+StartupWMClass=omafile
+# inode/directory is what makes `xdg-mime default omafile.desktop inode/directory` work,
+# so every other application opens folders here instead of in Nautilus (§13).
+MimeType=inode/directory;
+Categories=System;FileTools;FileManager;
+Keywords=file;manager;browser;explorer;folder;
+Actions=NewWindow;
+
+[Desktop Action NewWindow]
+Name=New Window
+Exec=omafile

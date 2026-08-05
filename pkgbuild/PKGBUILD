@@ -1,0 +1,59 @@
+# Maintainer: Chase Fournier <fournier.chase2@gmail.com>
+#
+# Builds from the working tree rather than a release tarball, which is what makes
+# `./bin/install` a one-liner during development. Point source= at a tag when it ships.
+
+pkgname=omafile
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='A dead-simple file manager for Omarchy'
+arch=('x86_64')
+url='https://github.com/warforged/omafile'
+license=('MIT')
+
+# fd is the only hard runtime dependency beyond Qt and the portal: recursive search
+# shells out to it (§2).
+depends=('qt6-base' 'qt6-declarative' 'qt6-svg' 'fd' 'xdg-utils')
+makedepends=('qt6-tools')
+
+# Everything omafile detects at startup and hides rather than failing on (§2). None of
+# these are needed to browse, act on, or search local files.
+optdepends=(
+  'ripgrep: search inside files (Ctrl+Alt+F)'
+  'sshfs: browse SSH hosts as folders'
+  'gvfs: browse SMB, WebDAV, MTP and SFTP shares'
+  'rclone: browse cloud storage'
+  'rsync: faster transfers to and from remote hosts'
+  'udisks2: mount and eject removable media'
+  'plocate: whole-filesystem search for queries starting with /'
+  'ttf-cascadia-code-nerd: the file-type glyphs (ships with Omarchy)'
+)
+
+source=()
+sha256sums=()
+
+build() {
+  cd "$startdir/.."
+  qmake6 omafile.pro
+  make -j"$(nproc)"
+}
+
+check() {
+  cd "$startdir/../tests"
+  qmake6 tests.pro
+  make -j"$(nproc)"
+  # Headless: the suite runs under QCoreApplication and needs no display.
+  QT_QPA_PLATFORM=offscreen "$startdir/../build/tests/tst_omafile"
+}
+
+package() {
+  cd "$startdir/.."
+
+  install -Dm755 build/omafile "$pkgdir/usr/bin/omafile"
+  install -Dm644 pkgbuild/omafile.desktop \
+    "$pkgdir/usr/share/applications/omafile.desktop"
+  install -Dm644 pkgbuild/omafile.svg \
+    "$pkgdir/usr/share/icons/hicolor/scalable/apps/omafile.svg"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+}

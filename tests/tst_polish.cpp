@@ -187,3 +187,24 @@ void TestPolish::readsLocalisedNames()
                                      QStringLiteral("thing.desktop")),
              QStringLiteral("thing.desktop"));
 }
+
+// One application often ships several .desktop ids — a native package and a Flatpak, say
+// — all carrying the same Name. Two identical rows in "Open with" cannot be told apart,
+// so only the first (highest-precedence) survives.
+void TestPolish::dropsDuplicateApplicationNames()
+{
+    const QString a = QStringLiteral("[Desktop Entry]\nName=Google Chrome\nExec=chrome\n");
+    const QString b = QStringLiteral("[Desktop Entry]\nName=Google Chrome\nExec=flatpak run\n");
+    // Both resolve to the same display name, which is the collision the list has to
+    // collapse; the ids themselves differ and are not a useful distinction to show.
+    QCOMPARE(Handlers::displayNameOf(a, QStringLiteral("x")),
+             Handlers::displayNameOf(b, QStringLiteral("y")));
+
+    // Real lookups are deduplicated by that name.
+    const QList<Handler> handlers = Handlers::forFile(QStringLiteral("/etc/hostname"));
+    QStringList names;
+    for (const Handler &handler : handlers) {
+        QVERIFY2(!names.contains(handler.name), qPrintable(handler.name + " listed twice"));
+        names.append(handler.name);
+    }
+}

@@ -83,6 +83,12 @@ Bulk rename in `$EDITOR` (`Ctrl+Shift+R`), the `Ctrl+?` overlay, the preview pan
 (`Ctrl+P`), the freedesktop thumbnail cache, and open-with (`Ctrl+Enter`). Bookmarks
 landed in M4 and the conflict dialog in M2. **182 tests pass.**
 
+### M6 — Ship ✅ (minus the Omarchy PR, which was descoped)
+`pkgbuild/PKGBUILD` + `bin/install`, a `.desktop` declaring `inode/directory`, an SVG
+icon, `README.md` with the hotkey table and a screenshot, and a GitHub Actions workflow
+that builds, tests and packages on Arch. The package builds and its binary runs from the
+staged tree; `desktop-file-validate` passes with no warnings.
+
 **Measured against §12:**
 
 | Budget | Target | Actual |
@@ -125,6 +131,21 @@ filled in only for visible rows plus a 24-row buffer.
 **Batches land in one go rather than streaming.** Measurement says streaming is not needed
 yet — 10k entries complete in 7 ms. Revisit north of ~500k.
 
+**The cursor moving and the cursor's row changing are different signals.** They were not,
+and it broke scrolling outright: scrolling asks for stats on the newly visible rows, the
+stats arrive, `onStatsReady` re-announced `currentIndexChanged` purely so the status bar
+could refresh its size text — and the QML handler on that signal calls
+`positionViewAtIndex`, dragging the view straight back to the selection. Every scroll
+fought its own snap-back.
+
+`currentIndexChanged` now means only "the cursor moved to a different row" and is the sole
+thing that scrolls the view; `currentDetailsChanged` means "the current row's contents
+changed" and never scrolls anything. `arrivingStatsDoNotMoveTheCursor` pins the invariant,
+and the QML side additionally refuses to scroll to an index it is already at.
+
+Fixing it also stopped the preview pane re-decoding the selected file on every stat that
+landed during a scroll, which was the same signal being overloaded.
+
 **The watcher diffs; it never resets.** A re-list is merge-walked against the current rows
 and applied as single-row inserts and removes, so scroll position survives and the
 selection follows the *file*, not the row number.
@@ -135,6 +156,27 @@ created during the initial listing would be missed by inotify forever.
 **Backspace edits the filter before it navigates up — a deviation from §5,** which assigns
 it to "parent directory" unconditionally. With bare letters typing into the filter,
 correcting a typo would otherwise throw you into the parent.
+
+### Shipping (M6)
+
+**The PKGBUILD builds from the working tree, not a release tarball.** That is what makes
+`./bin/install` a one-liner while the project is still moving; point `source=` at a tag
+when it is actually released. `check()` runs the full suite, so a package cannot be built
+from a tree whose tests fail.
+
+**`desktop-file-validate` caught two things worth fixing:** `x-directory/normal` is a
+deprecated MIME type (only `inode/directory` is needed, which is what §13 specifies
+anyway), and listing both `System` and `Utility` gives an application *two* main
+categories, which makes it appear twice in a menu. Both removed; the entry now validates
+silently.
+
+**CI packages as well as tests.** Building and running the suite proves the code works;
+running `makepkg` proves the PKGBUILD still installs what it claims. The latter is the
+part that rots silently, because nobody runs it between releases.
+
+**The screenshot is taken with `--select`, not with synthetic keystrokes.** Driving the
+cursor with `hyprctl sendshortcut` failed repeatedly and landed on the wrong row; passing
+`--select <file>` puts it exactly where the shot needs it, deterministically.
 
 ### Remembered UI state
 
@@ -199,6 +241,17 @@ guessing. Use `QImage`'s pair.
 full-pane preview from it would be blurry. The preview decodes properly and *writes* the
 cache as a side effect, so the rest of the desktop benefits without omafile showing a
 worse picture than it could.
+
+**Choice overlays wrap, and long ones stack.** The choices were laid out in a `Row`,
+which cannot wrap — a set wider than the panel simply ran off the edge with no way to
+reach the rest. It is a `Flow` now, and "Open with" sets `stacked` so each application
+gets its own line; short verb sets like Replace / Skip / Rename / Cancel still read well
+side by side.
+
+**Handlers are deduplicated by display name.** One application often registers several
+desktop ids — a native package and a Flatpak — all with the same `Name`. Two identical
+"Google Chrome" rows cannot be told apart, so only the first survives; precedence has
+already put the better one first.
 
 **Open-with only reads the desktop's registry, never writes it.** §1 is explicit that
 file-type associations are `xdg-mime`'s job. Handlers come from `mimeapps.list` (user
@@ -577,13 +630,10 @@ really §16.7's open question; the machinery is ready either way.
 **Open-with has not been driven by hand.** The parsing is tested, but the chooser overlay
 has never been opened against a real MIME type.
 
-**A directory shows a blank preview pane**, because directories have no preview. It reads
-as a bug at a glance — it briefly fooled me into thinking persistence was broken — and
-probably wants an item count or a dash rather than nothing.
-
-**Startup has crept: 86 ms at M0, 109 ms now.** Still inside the 120 ms budget, but the
-margin is thinner than it was, and the measurement is very sensitive to what else is
-running (a Chrome tab at 19% CPU moved the median to 135 ms).
+**Startup has crept: 86 ms at M0, ~105 ms now**, and the margin against the 120 ms budget
+is thin. The measurement is extremely sensitive to machine load — the same binary measures
+95 ms idle and 167 ms immediately after a `makepkg` run. Judge it only on a settled
+machine, and take the median of a dozen samples, not three.
 
 **Bulk rename's `$EDITOR` round trip has not been run by hand.** The planning is covered by
 19 tests including on-disk replay, but launching a terminal, editing, and applying the

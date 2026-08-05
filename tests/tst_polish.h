@@ -26,6 +26,7 @@ private slots:
     void parsesMimeAssociations();
     void ignoresOtherSections();
     void readsLocalisedNames();
+    void dropsDuplicateApplicationNames();
 
 private:
     QTemporaryDir m_home;

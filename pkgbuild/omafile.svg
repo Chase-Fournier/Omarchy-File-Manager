@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <!--
+    The app in one mark: a folder that is really a list, with one row picked out. Two
+    colours only, matching the rule the UI itself follows — one accent, everything else
+    the foreground (§4). Flat, no gradients, and drawn as a single closed path so the tab
+    still joins the body at 32 px on a panel.
+  -->
+  <rect width="128" height="128" rx="26" fill="#1a1b26"/>
+
+  <path d="M22 100 V38 a7 7 0 0 1 7-7 h20 l9 10 h47 a7 7 0 0 1 7 7 v52 a7 7 0 0 1 -7 7
+           H29 a7 7 0 0 1 -7-7 z"
+        fill="none" stroke="#a9b1d6" stroke-width="5" stroke-linejoin="round"/>
+
+  <!-- The rows. The selected one is the single accent use, exactly as in the app. -->
+  <rect x="36" y="60" width="40" height="6" rx="3" fill="#a9b1d6" opacity="0.5"/>
+  <rect x="34" y="74" width="60" height="10" rx="5" fill="#7aa2f7"/>
+  <rect x="36" y="92" width="48" height="6" rx="3" fill="#a9b1d6" opacity="0.5"/>
+</svg>

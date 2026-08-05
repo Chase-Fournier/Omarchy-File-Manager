@@ -19,6 +19,7 @@ private slots:
     void hiddenFilesAreOptIn();
     void filterNarrowsAndReportsMatchPositions();
     void statsArriveOnlyForRequestedRows();
+    void arrivingStatsDoNotMoveTheCursor();
     void handlesAwkwardFilenames();
     void reportsBrokenSymlinks();
     void reportsPermissionDenied();

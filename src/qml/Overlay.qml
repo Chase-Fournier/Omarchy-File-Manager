@@ -14,6 +14,9 @@ FocusScope {
     property string label: ""
     property string initialText: ""
     property var choices: []          // [{ key: "r", label: "Replace", value: 0 }, ...]
+    // One choice per line. Short verb sets (Replace / Skip / Rename / Cancel) read well
+    // side by side; application names do not, and used to run straight off the panel.
+    property bool stacked: false
     property bool offerApplyToAll: false
     property bool applyToAll: false
     // Masks the field and skips the "looks like a filename" validation.
@@ -165,9 +168,12 @@ FocusScope {
                     }
                 }
 
-                Row {
+                // Flow, not Row: a Row cannot wrap, so a set of choices wider than the
+                // panel simply ran off the edge with no way to see or reach the rest.
+                Flow {
                     id: choiceRow
 
+                    width: parent.width
                     spacing: 18
 
                     Repeater {
@@ -176,6 +182,9 @@ FocusScope {
                         Text {
                             required property var modelData
 
+                            // Full width when stacked, so exactly one lands per line.
+                            width: overlay.stacked ? choiceRow.width : implicitWidth
+                            elide: Text.ElideRight
                             text: "[" + modelData.key + "] " + modelData.label
                             color: Theme.fg
                             font.family: app.monoFamily

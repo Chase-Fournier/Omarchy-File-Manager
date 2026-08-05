@@ -153,6 +153,7 @@ QList<Handler> forFile(const QString &path)
     }
 
     QList<Handler> handlers;
+    QSet<QString> seenNames;
     for (const QString &id : std::as_const(ordered)) {
         const QString file = findDesktopFile(id);
         if (file.isEmpty())
@@ -162,6 +163,15 @@ QList<Handler> forFile(const QString &path)
         handler.desktopId = id;
         handler.desktopFile = file;
         handler.name = displayNameOf(readFile(file), id);
+
+        // One application often ships several .desktop ids — a native package and a
+        // Flatpak, say — all with the same Name. Offering "Google Chrome" twice with no
+        // way to tell them apart is worse than offering it once; precedence already put
+        // the better one first.
+        if (seenNames.contains(handler.name))
+            continue;
+        seenNames.insert(handler.name);
+
         handler.isDefault = handlers.isEmpty();
         handlers.append(handler);
     }

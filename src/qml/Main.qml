@@ -84,6 +84,7 @@ Window {
         overlay.choices = apps.slice(0, letters.length).map(function (app, i) {
             return { key: letters[i], label: app.name, value: i }
         })
+        overlay.stacked = true
         overlay.offerApplyToAll = false
         overlay.pending = "openWith"
         overlay.pendingApps = apps
@@ -112,6 +113,7 @@ Window {
         overlay.initialText = ""
         overlay.offerApplyToAll = false
         overlay.secret = false
+        overlay.stacked = false
         overlay.pending = "connect"
         overlay.open()
     }
@@ -348,6 +350,7 @@ Window {
         overlay.initialText = "untitled"
         overlay.offerApplyToAll = false
         overlay.secret = false
+        overlay.stacked = false
         overlay.pending = "newFolder"
         overlay.open()
     }
@@ -363,6 +366,7 @@ Window {
                            { key: "c", label: "Cancel", value: 0 }]
         overlay.offerApplyToAll = false
         overlay.secret = false
+        overlay.stacked = false
         overlay.pending = "delete"
         overlay.open()
     }
@@ -480,7 +484,8 @@ Window {
             overlay.choices = [{ key: "t", label: "Open terminal", value: 1 },
                                { key: "c", label: "Cancel", value: 0 }]
             overlay.offerApplyToAll = false
-            overlay.pending = "connectTerminal"
+            overlay.stacked = false
+        overlay.pending = "connectTerminal"
             overlay.pendingHost = hostAlias
             overlay.open()
         }
@@ -492,7 +497,8 @@ Window {
             overlay.initialText = ""
             overlay.secret = true
             overlay.offerApplyToAll = false
-            overlay.pending = "password"
+            overlay.stacked = false
+        overlay.pending = "password"
             overlay.open()
         }
     }
@@ -720,12 +726,19 @@ Window {
                 onContentYChanged: reportVisible()
                 onHeightChanged: reportVisible()
 
+                // Belt and braces: even if something re-announces the index without it
+                // having changed, the view must not jump. Scrolling is the user's.
+                property int lastScrolledTo: -1
+
                 Connections {
                     target: Dir
                     function onCountsChanged() { list.reportVisible() }
                     function onCurrentIndexChanged() {
-                        if (!Find.active && Dir.currentIndex >= 0)
+                        if (!Find.active && Dir.currentIndex >= 0
+                            && Dir.currentIndex !== list.lastScrolledTo) {
+                            list.lastScrolledTo = Dir.currentIndex
                             list.positionViewAtIndex(Dir.currentIndex, ListView.Contain)
+                        }
                         Preview.show(Dir.currentIndex >= 0 ? Dir.rowPath(Dir.currentIndex) : "")
                     }
                 }
