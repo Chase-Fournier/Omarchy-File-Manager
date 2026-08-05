@@ -4,6 +4,7 @@
 #include "journal.h"
 
 #include <QObject>
+#include <QVariantList>
 #include <QStringList>
 #include <QThread>
 #include <QTimer>
@@ -50,6 +51,9 @@ public:
     Q_INVOKABLE void deletePermanently(const QStringList &paths);
     Q_INVOKABLE void newFolder(const QString &parentDir, const QString &name);
     Q_INVOKABLE void rename(const QString &path, const QString &newName);
+    // §9: writes the names to a temp file, opens $EDITOR on it, and applies the diff when
+    // the editor exits. Regex rename, numbering, case changes and sorting for free.
+    Q_INVOKABLE void bulkRename(const QString &directory, const QStringList &names);
     Q_INVOKABLE void undo();
 
     // A drop from another app, or from another omafile window.
@@ -70,6 +74,10 @@ public:
     // A content-search hit: $EDITOR at that line, in a terminal. Falls back to xdg-open
     // when there is no editor or no line to jump to.
     Q_INVOKABLE void openAtLine(const QString &path, int line);
+
+    // "Open with…" (Ctrl+Enter). Returns [{name, desktopFile, isDefault}, …] for QML.
+    Q_INVOKABLE QVariantList handlersFor(const QString &path) const;
+    Q_INVOKABLE void openWith(const QString &desktopFile, const QString &path);
 
     // True when moving these paths into this directory would stay on one filesystem,
     // which is what makes move the sensible default for a drop (§7).
@@ -122,4 +130,9 @@ private:
 
     // §8: the status line clears itself after five seconds.
     QTimer m_statusTimer;
+
+    // Held while $EDITOR is open, so the reply can be matched to what was sent.
+    QString m_renameDirectory;
+    QStringList m_renameOriginals;
+    QString m_renameFile;
 };

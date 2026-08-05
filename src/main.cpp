@@ -1,6 +1,8 @@
 #include "directorymodel.h"
 #include "operations.h"
 #include "places.h"
+#include "preview.h"
+#include "previewimageprovider.h"
 #include "searchmodel.h"
 #include "location.h"
 #include "theme.h"
@@ -98,6 +100,7 @@ int main(int argc, char *argv[])
     Operations operations;
     SearchModel search;
     Places places;
+    Preview preview;
 
     QQmlApplicationEngine engine;
     qmlRegisterSingletonInstance("Omafile", 1, 0, "Theme", &theme);
@@ -105,6 +108,8 @@ int main(int argc, char *argv[])
     qmlRegisterSingletonInstance("Omafile", 1, 0, "Ops", &operations);
     qmlRegisterSingletonInstance("Omafile", 1, 0, "Find", &search);
     qmlRegisterSingletonInstance("Omafile", 1, 0, "Places", &places);
+    qmlRegisterSingletonInstance("Omafile", 1, 0, "Preview", &preview);
+    engine.addImageProvider(QStringLiteral("preview"), new PreviewImageProvider(&preview));
     // Registered only so QML can name the sort enum; the instance above is the model.
     qmlRegisterUncreatableType<DirectoryModel>("Omafile", 1, 0, "DirectoryModel",
                                                QStringLiteral("Use the Dir singleton"));

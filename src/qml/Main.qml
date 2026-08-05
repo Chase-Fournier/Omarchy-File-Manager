@@ -21,6 +21,7 @@ Window {
     property bool editingPath: false
     property int renamingRow: -1
     readonly property bool overlayActive: overlay.visible || Ops.conflictActive
+                                          || help.visible
     readonly property int pageStep: Math.max(1, Math.floor(list.height / rowHeight) - 1)
 
     function luma(c) { return 0.299 * c.r + 0.587 * c.g + 0.114 * c.b }
@@ -61,6 +62,35 @@ Window {
     function toggleSelection() { Dir.toggleSelection(Dir.currentIndex) }
     function extendSelection(delta) { Dir.extendSelection(delta) }
     function openTerminal() { Ops.openTerminal(Dir.path) }
+    function showHelp() { help.open() }
+    function togglePreview() { Preview.enabled = !Preview.enabled }
+
+    // Ctrl+Enter: pick the application rather than accepting xdg-open's default (§5).
+    function openWith() {
+        const paths = Dir.actionPaths()
+        if (paths.length === 0)
+            return
+        const apps = Ops.handlersFor(paths[0])
+        if (apps.length === 0) {
+            Ops.reportStatus("nothing is registered to open that")
+            return
+        }
+
+        // Letters rather than arrow keys, like every other choice in the app.
+        const letters = "asdfghjkl"
+        overlay.mode = "choice"
+        overlay.secret = false
+        overlay.label = "Open \"" + paths[0].split("/").pop() + "\" with"
+        overlay.choices = apps.slice(0, letters.length).map(function (app, i) {
+            return { key: letters[i], label: app.name, value: i }
+        })
+        overlay.offerApplyToAll = false
+        overlay.pending = "openWith"
+        overlay.pendingApps = apps
+        overlay.pendingPath = paths[0]
+        overlay.open()
+    }
+    function bulkRename() { Ops.bulkRename(Dir.path, Dir.actionNames()) }
 
     // ── Places and remote (§10) ──────────────────────────────────────
     property bool sidebarVisible: false
@@ -422,6 +452,8 @@ Window {
     }
 
     Shortcuts {
+        id: shortcuts
+
         app: root
     }
 
@@ -493,6 +525,18 @@ Window {
 
             if (event.key === Qt.Key_Escape) {
                 root.escapePressed()
+                event.accepted = true
+                return
+            }
+
+            // Ctrl+? is matched here rather than as a Shortcut sequence because "?" needs
+            // Shift on most layouts, so the event actually arrives as Ctrl+Shift+Question
+            // — which matches neither QKeySequence("Ctrl+?") (Ctrl only) nor
+            // QKeySequence("Ctrl+Shift+/") (which wants Key_Slash). Testing the key and
+            // the Control modifier works on every layout.
+            if ((event.modifiers & Qt.ControlModifier)
+                && (event.key === Qt.Key_Question || event.key === Qt.Key_Slash)) {
+                root.showHelp()
                 event.accepted = true
                 return
             }
@@ -647,7 +691,8 @@ Window {
                 anchors.bottom: statusBar.top
                 anchors.bottomMargin: root.pad / 2
                 anchors.left: parent.left
-                anchors.right: parent.right
+                anchors.right: previewPane.visible ? previewPane.left : parent.right
+                anchors.rightMargin: previewPane.visible ? root.pad : 0
 
                 clip: true
                 // Selection is driven by the model, not by the view's own key handling.
@@ -674,6 +719,7 @@ Window {
                     function onCurrentIndexChanged() {
                         if (!Find.active && Dir.currentIndex >= 0)
                             list.positionViewAtIndex(Dir.currentIndex, ListView.Contain)
+                        Preview.show(Dir.currentIndex >= 0 ? Dir.rowPath(Dir.currentIndex) : "")
                     }
                 }
 
@@ -816,6 +862,20 @@ Window {
                 }
             }
 
+            PreviewPane {
+                id: previewPane
+
+                app: root
+                visible: Preview.enabled
+                anchors.top: filterLine.bottom
+                anchors.topMargin: root.pad / 2
+                anchors.bottom: statusBar.top
+                anchors.bottomMargin: root.pad / 2
+                anchors.right: parent.right
+                // §11: the right 40% of the window.
+                width: visible ? parent.width * 0.4 : 0
+            }
+
             // ── Status bar ────────────────────────────────────────────────
             Item {
                 id: statusBar
@@ -891,6 +951,16 @@ Window {
     }
 
     // ── Modal surfaces ───────────────────────────────────────────────
+    // Declared after the list on purpose: QML paints in declaration order, so anything
+    // that covers the content has to come after it.
+    HelpOverlay {
+        id: help
+
+        app: root
+        // Straight from the binding table, so the two can never disagree.
+        table: shortcuts.table
+    }
+
     Overlay {
         id: overlay
 
@@ -898,6 +968,8 @@ Window {
         // Which caller opened it, so one overlay can serve several questions.
         property string pending: ""
         property string pendingHost: ""
+        property var pendingApps: []
+        property string pendingPath: ""
 
         onAccepted: function (text) {
             if (pending === "newFolder")
@@ -912,6 +984,8 @@ Window {
                 Ops.deletePermanently(Dir.actionPaths())
             else if (pending === "connectTerminal" && value === 1)
                 Places.connectInTerminal(pendingHost)
+            else if (pending === "openWith" && value >= 0 && value < pendingApps.length)
+                Ops.openWith(pendingApps[value].desktopFile, pendingPath)
         }
         onCancelled: {
             if (pending === "password")

@@ -14,17 +14,22 @@ INCLUDEPATH += $$PWD/../src
 
 SOURCES += \
     main.cpp \
+    tst_bulkrename.cpp \
     tst_directorymodel.cpp \
     tst_fileops.cpp \
     tst_formatting.cpp \
     tst_fuzzyscorer.cpp \
     tst_location.cpp \
+    tst_polish.cpp \
     tst_remote.cpp \
     tst_search.cpp \
     tst_theme.cpp \
+    ../src/bulkrename.cpp \
     ../src/directorymodel.cpp \
     ../src/fileops.cpp \
     ../src/formatting.cpp \
+    ../src/handlers.cpp \
+    ../src/thumbnails.cpp \
     ../src/hosts.cpp \
     ../src/mounts.cpp \
     ../src/fuzzyscorer.cpp \
@@ -40,18 +45,23 @@ SOURCES += \
     ../src/watcher.cpp
 
 HEADERS += \
+    tst_bulkrename.h \
     tst_directorymodel.h \
     tst_fileops.h \
     tst_formatting.h \
     tst_fuzzyscorer.h \
     tst_location.h \
+    tst_polish.h \
     tst_remote.h \
     tst_search.h \
     tst_theme.h \
+    ../src/bulkrename.h \
     ../src/directorymodel.h \
     ../src/entry.h \
     ../src/fileops.h \
     ../src/formatting.h \
+    ../src/handlers.h \
+    ../src/thumbnails.h \
     ../src/hosts.h \
     ../src/mounts.h \
     ../src/fuzzyscorer.h \

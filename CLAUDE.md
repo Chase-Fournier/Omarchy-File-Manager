@@ -78,6 +78,11 @@ media, `Ctrl+S` connect-to, `Ctrl+D` bookmarks, `Ctrl+E` eject, remote-side sear
 See "To verify" below: the plan makes it conditional, and its enabling decision (§16.5)
 is unresolved and unmeasurable on this machine.
 
+### M5 — Polish ✅
+Bulk rename in `$EDITOR` (`Ctrl+Shift+R`), the `Ctrl+?` overlay, the preview pane
+(`Ctrl+P`), the freedesktop thumbnail cache, and open-with (`Ctrl+Enter`). Bookmarks
+landed in M4 and the conflict dialog in M2. **182 tests pass.**
+
 **Measured against §12:**
 
 | Budget | Target | Actual |
@@ -130,6 +135,75 @@ created during the initial listing would be missed by inotify forever.
 **Backspace edits the filter before it navigates up — a deviation from §5,** which assigns
 it to "parent directory" unconditionally. With bare letters typing into the filter,
 correcting a typo would otherwise throw you into the parent.
+
+### Polish (M5)
+
+**Bulk rename plans before it touches anything.** `BulkRename::plan` is pure, so the
+awkward cases are testable without a filesystem: a changed line count aborts the whole
+edit rather than renaming a prefix of it (§9), and duplicate targets, empty names and
+slashes are all refused up front.
+
+**Rename cycles are broken with a temporary hop.** `a→b, b→a` cannot be executed in either
+order without destroying a file, so one member is routed through
+`.omafile-rename-N-<name>` first. A three-way rotation takes four moves. The proof is not
+the unit assertions but `executesCorrectlyOnDisk`, which replays each plan against real
+files and checks that every final name holds the content it should — an ordering bug shows
+up there as a crossed or missing file, which is exactly how this fails in the wild.
+
+**The whole edit is one journal entry**, recording the user's intent rather than the
+temporary hops, so a single Ctrl+Z puts every name back. A failure part-way rolls back
+what already ran.
+
+**Previews decode off the GUI thread and honour the selection that asked for them.**
+`QImageReader::setScaledSize` is set *before* `read()`, which is what stops a 40 MP photo
+being fully decoded to draw it 400 px wide (§11). A decode that lands after the cursor
+moved on is dropped by generation, not shown. Text is sniffed by content — a NUL byte in
+the first block means binary — rather than by extension.
+
+**The preview image reaches QML through a `QQuickImageProvider`,** not a property or a
+temp file, so it is never decoded twice. The URL carries a counter because Qt's pixmap
+cache would otherwise keep serving the first image under a name it had already seen.
+
+**The thumbnail cache is verified interoperable, not merely spec-shaped.** The spec hashes
+the `file://` *URI*, not the path — get that wrong and every other application's cache
+entries are invisible. Proved by taking real entries this machine already had in
+`~/.cache/thumbnails/large`, reading their `Thumb::URI` tag, and confirming
+`md5(uri) == filename`. Both matched, so omafile finds thumbnails other apps made and
+vice versa.
+
+**`QImageWriter::setText` does not round-trip; `QImage::setText` does.** The tags appeared
+to write — `write()` returned true and a `tEXt` chunk landed in the file — but reading
+them back gave an empty key list every time, so every cached thumbnail was silently
+rejected as untagged. Confirmed by testing both APIs side by side in isolation rather than
+guessing. Use `QImage`'s pair.
+
+**A cached thumbnail is deliberately not served as the preview.** The cache is 256 px; a
+full-pane preview from it would be blurry. The preview decodes properly and *writes* the
+cache as a side effect, so the rest of the desktop benefits without omafile showing a
+worse picture than it could.
+
+**Open-with only reads the desktop's registry, never writes it.** §1 is explicit that
+file-type associations are `xdg-mime`'s job. Handlers come from `mimeapps.list` (user
+choices first) then `mimeinfo.cache`, and launching goes through `gio launch` so the
+`.desktop` Exec semantics — field codes, `Terminal=true`, startup notification — are
+applied by something that already implements them correctly.
+
+**`Ctrl+?` is matched by key and modifier, not as a `Shortcut` sequence.** "?" needs Shift
+on most layouts, so the event arrives as **Ctrl+Shift+Question** — which matches neither
+`QKeySequence("Ctrl+?")` (Control only) nor `QKeySequence("Ctrl+Shift+/")` (which wants
+`Key_Slash`, not `Key_Question`). Both were bound and neither ever fired; only F1 worked.
+Testing `Key_Question || Key_Slash` with the Control modifier in `Keys.onPressed` works on
+any layout. It stays in the shortcut table so the overlay still documents it.
+
+**QML paints in declaration order, so an overlay must be declared after what it covers.**
+The help overlay was declared next to `Shortcuts` — before the list — and so rendered
+*underneath* it: the file list showed straight through a backdrop set to 0.97 opacity.
+All modal surfaces now live together at the end of Main.qml for that reason.
+
+**The `Ctrl+?` overlay is generated from `Shortcuts.qml`'s table.** §5 asks for exactly
+this: the documentation cannot drift from the bindings, because adding a shortcut adds a
+line to the overlay and removing one removes it. The single binding it cannot show is bare
+letters, which are handled in `Keys.onPressed` and noted in the footer by hand.
 
 ### Remote (M4a)
 
@@ -431,8 +505,23 @@ practice on Omarchy.
 unrun. The refcount logic, the option strings and the gvfs path resolution are all
 unproven against a real mount.
 
-**No bulk rename yet** (§9's vimv approach) — that is M5, along with the `Ctrl+?` overlay
-that will be generated from `Shortcuts.qml`'s table.
+**Thumbnails are cached but never displayed in the list.** The cache is written and is
+interoperable, but the file list still shows type glyphs only — §4 is emphatic about
+"Nerd Font glyphs for file types, not an icon theme. One color, one weight, no rainbow",
+and photo thumbnails in a 32 px row would contradict that. §11's "generate only for
+visible rows" therefore has no consumer yet. Whether the list should show them at all is
+really §16.7's open question; the machinery is ready either way.
+
+**Open-with has not been driven by hand.** The parsing is tested, but the chooser overlay
+has never been opened against a real MIME type.
+
+**Startup has crept: 86 ms at M0, 109 ms now.** Still inside the 120 ms budget, but the
+margin is thinner than it was, and the measurement is very sensitive to what else is
+running (a Chrome tab at 19% CPU moved the median to 135 ms).
+
+**Bulk rename's `$EDITOR` round trip has not been run by hand.** The planning is covered by
+19 tests including on-disk replay, but launching a terminal, editing, and applying the
+result on exit has only been exercised through code review.
 
 **Find-mode UI is verified only headlessly.** `Ctrl+F` was confirmed on screen (ranked
 results, bolded matches, "27 results · of 382 scanned"), but `Ctrl+Alt+F` never landed

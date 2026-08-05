@@ -1,6 +1,8 @@
 #include "operations.h"
 
+#include "bulkrename.h"
 #include "clipboard.h"
+#include "handlers.h"
 #include "mounts.h"
 #include "opener.h"
 
@@ -11,9 +13,13 @@
 #include <QGuiApplication>
 #include <QProcess>
 #include <QStandardPaths>
+#include <QTemporaryFile>
 #include <QUrl>
 
 #include <sys/stat.h>
+
+// Defined below, next to openTerminal; both bulk rename and terminal-here need it.
+static QString findTerminal();
 
 namespace {
 
@@ -215,6 +221,75 @@ void Operations::rename(const QString &path, const QString &newName)
                               Q_ARG(quint64, operation));
 }
 
+void Operations::bulkRename(const QString &directory, const QStringList &names)
+{
+    if (names.isEmpty() || directory.isEmpty())
+        return;
+    if (!m_renameFile.isEmpty()) {
+        setStatus(QStringLiteral("a bulk rename is already open"));
+        return;
+    }
+
+    const QString editor = QString::fromLocal8Bit(qgetenv("EDITOR"));
+    const QString terminal = findTerminal();
+    if (editor.isEmpty() || terminal.isEmpty()) {
+        setStatus(QStringLiteral("set $EDITOR to use bulk rename"));
+        return;
+    }
+
+    // A real file rather than a pipe: $EDITOR needs something to open, and keeping it
+    // out of the directory being renamed avoids it appearing in its own listing.
+    auto *file = new QTemporaryFile(QDir::tempPath() + QStringLiteral("/omafile-rename-XXXXXX"));
+    file->setAutoRemove(false);
+    if (!file->open()) {
+        delete file;
+        setStatus(QStringLiteral("could not create the rename file"));
+        return;
+    }
+    file->write(names.join(QLatin1Char('\n')).toUtf8());
+    file->write("\n");
+    m_renameFile = file->fileName();
+    file->close();
+    delete file;
+
+    m_renameDirectory = directory;
+    m_renameOriginals = names;
+
+    auto *process = new QProcess(this);
+    process->setProgram(terminal);
+    process->setArguments({ QStringLiteral("-e"), editor, m_renameFile });
+    connect(process, &QProcess::finished, this,
+            [this, process](int, QProcess::ExitStatus) {
+                process->deleteLater();
+
+                QFile edited(m_renameFile);
+                QStringList lines;
+                if (edited.open(QIODevice::ReadOnly | QIODevice::Text))
+                    lines = BulkRename::linesOf(QString::fromUtf8(edited.readAll()));
+                edited.remove();
+
+                const QString directory = m_renameDirectory;
+                const QStringList originals = m_renameOriginals;
+                m_renameFile.clear();
+                m_renameDirectory.clear();
+                m_renameOriginals.clear();
+
+                if (lines.isEmpty()) {
+                    setStatus(QStringLiteral("bulk rename cancelled"));
+                    return;
+                }
+
+                const quint64 operation = begin();
+                QMetaObject::invokeMethod(m_ops, "bulkRename", Qt::QueuedConnection,
+                                          Q_ARG(QString, directory),
+                                          Q_ARG(QStringList, originals),
+                                          Q_ARG(QStringList, lines),
+                                          Q_ARG(quint64, operation));
+            });
+    process->start();
+    setStatus(QStringLiteral("editing %1 names…").arg(names.size()));
+}
+
 void Operations::undo()
 {
     if (!m_journal.canUndo())
@@ -348,6 +423,26 @@ void Operations::openTerminal(const QString &directory)
     process.setWorkingDirectory(directory);
     process.setProgram(terminal);
     process.startDetached();
+}
+
+QVariantList Operations::handlersFor(const QString &path) const
+{
+    QVariantList out;
+    const QList<Handler> handlers = Handlers::forFile(path);
+    for (const Handler &handler : handlers) {
+        out.append(QVariantMap { { QStringLiteral("name"), handler.name },
+                                 { QStringLiteral("desktopFile"), handler.desktopFile },
+                                 { QStringLiteral("isDefault"), handler.isDefault } });
+    }
+    return out;
+}
+
+void Operations::openWith(const QString &desktopFile, const QString &path)
+{
+    Handler handler;
+    handler.desktopFile = desktopFile;
+    if (!Handlers::launch(handler, path))
+        setStatus(QStringLiteral("could not launch that application"));
 }
 
 void Operations::openAtLine(const QString &path, int line)

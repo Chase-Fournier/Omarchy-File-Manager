@@ -1,8 +1,10 @@
+#include "tst_bulkrename.h"
 #include "tst_directorymodel.h"
 #include "tst_fileops.h"
 #include "tst_formatting.h"
 #include "tst_fuzzyscorer.h"
 #include "tst_location.h"
+#include "tst_polish.h"
 #include "tst_remote.h"
 #include "tst_search.h"
 #include "tst_theme.h"
@@ -64,12 +66,14 @@ int main(int argc, char *argv[])
 
     run(new TestFormatting);
     run(new TestFuzzyScorer);
+    run(new TestBulkRename);
     run(new TestLocation);
     run(new TestTheme);
     run(new TestDirectoryModel);
     run(new TestFileOps);
     run(new TestSearch);
     run(new TestRemote);
+    run(new TestPolish);
 
     if (ran == 0) {
         qWarning("no suite contains %s", qPrintable(wanted.join(QLatin1String(", "))));

@@ -25,6 +25,7 @@ Item {
 
         { keys: ["Right", "Return", "Enter"], label: "Open",         action: () => app.activateCurrent() },
         { keys: ["Shift+Return", "Shift+Enter"], label: "Open in new window", action: () => app.activateCurrentInNewWindow() },
+        { keys: ["Ctrl+Return", "Ctrl+Enter"], label: "Open with…",    action: () => app.openWith() },
         { keys: ["Left"],             label: "Parent directory",     action: () => app.goUp() },
 
         { keys: ["Space"],            label: "Add to selection",     action: () => app.toggleSelection() },
@@ -44,6 +45,7 @@ Item {
         { keys: ["Ctrl+Shift+C"],     label: "Copy absolute path",   action: () => app.copyPath() },
 
         { keys: ["F2", "Ctrl+R"],     label: "Rename",               action: () => app.beginRename() },
+        { keys: ["Ctrl+Shift+R"],     label: "Bulk rename in $EDITOR", action: () => app.bulkRename() },
         { keys: ["Delete"],           label: "Move to trash",        action: () => app.trashOrConfirm() },
         { keys: ["Shift+Delete"],     label: "Delete permanently",   action: () => app.confirmDelete() },
         { keys: ["Ctrl+Z"],           label: "Undo",                 action: () => Ops.undo() },
@@ -53,6 +55,7 @@ Item {
         { keys: ["Ctrl+Alt+F"],       label: "Search file contents", action: () => app.beginContentFind() },
 
         { keys: ["Ctrl+B"],           label: "Toggle sidebar",       action: () => app.toggleSidebar() },
+        { keys: ["Ctrl+P"],           label: "Toggle preview pane",  action: () => app.togglePreview() },
         { keys: ["Ctrl+D"],           label: "Bookmark here",        action: () => app.bookmarkHere() },
         { keys: ["Ctrl+S"],           label: "Connect to…",          action: () => app.promptConnect() },
         { keys: ["Ctrl+E"],           label: "Eject / unmount",      action: () => app.ejectHere() },
@@ -62,6 +65,9 @@ Item {
         { keys: ["Ctrl+H"],           label: "Toggle hidden files",  action: () => app.toggleHidden() },
         { keys: ["Ctrl+N"],           label: "New window",           action: () => app.newWindow() },
         { keys: ["F5"],               label: "Refresh",              action: () => app.refresh() },
+        // Ctrl+? is handled in Main.qml's Keys.onPressed, not as a sequence — see the
+        // comment there. It stays in this table so the overlay still documents it.
+        { keys: ["Ctrl+?", "F1"],     label: "Show shortcuts",       action: () => app.showHelp() },
 
         // Sorting has no assignment in §5, so it uses digits rather than squatting on a
         // key reserved for a later milestone. Repeating the current mode reverses it.

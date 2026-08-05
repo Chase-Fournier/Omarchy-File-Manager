@@ -41,6 +41,9 @@ public slots:
     void removePermanently(const QStringList &paths, quint64 id);
     void makeDirectory(const QString &parentDir, const QString &name, quint64 id);
     void renameEntry(const QString &path, const QString &newName, quint64 id);
+    // §9: the whole edit lands as *one* undoable operation, or none of it does.
+    void bulkRename(const QString &directory, const QStringList &originals,
+                    const QStringList &edited, quint64 id);
     void undo(const JournalEntry &entry, quint64 id);
 
 signals:

@@ -1,5 +1,7 @@
 #include "fileops.h"
 
+#include "bulkrename.h"
+
 #include <QDir>
 #include <QDirIterator>
 #include <QFile>
@@ -537,6 +539,59 @@ void FileOps::renameEntry(const QString &path, const QString &newName, quint64 i
     entry.kind = JournalEntry::Renamed;
     entry.moves.append({ path, target });
     entry.summary = QStringLiteral("Renamed to %1").arg(newName);
+    emit finished(id, entry);
+}
+
+void FileOps::bulkRename(const QString &directory, const QStringList &originals,
+                         const QStringList &edited, quint64 id)
+{
+    beginOperation();
+
+    const BulkRename::Plan plan = BulkRename::plan(originals, edited);
+    if (!plan.ok) {
+        emit failed(id, plan.error);
+        return;
+    }
+    if (plan.steps.isEmpty()) {
+        emit finished(id, JournalEntry {});
+        return;
+    }
+
+    // Applied in order, rolling the whole thing back on the first failure — a bulk
+    // rename that half-succeeded is worse than one that did not run (§9).
+    QList<QPair<QString, QString>> done;
+    for (const auto &step : plan.steps) {
+        const QString from = joinPath(directory, step.first);
+        const QString to = joinPath(directory, step.second);
+
+        if (QFileInfo::exists(to) || ::rename(QFile::encodeName(from).constData(),
+                                              QFile::encodeName(to).constData()) != 0) {
+            const QString reason = QFileInfo::exists(to)
+                ? QStringLiteral("\"%1\" already exists").arg(step.second)
+                : errorString();
+
+            for (int i = int(done.size()) - 1; i >= 0; --i) {
+                ::rename(QFile::encodeName(done.at(i).second).constData(),
+                         QFile::encodeName(done.at(i).first).constData());
+            }
+            emit failed(id, QStringLiteral("%1 — nothing was renamed").arg(reason));
+            return;
+        }
+        done.append({ from, to });
+    }
+
+    // The journal records the user's intent, not the temporary hops a cycle needed, so
+    // one Ctrl+Z puts every name back.
+    JournalEntry entry;
+    entry.kind = JournalEntry::Renamed;
+    for (int i = 0; i < originals.size(); ++i) {
+        if (originals.at(i) != edited.at(i)) {
+            entry.moves.append({ joinPath(directory, originals.at(i)),
+                                 joinPath(directory, edited.at(i)) });
+        }
+    }
+    entry.summary = plan.changed == 1 ? QStringLiteral("Renamed 1 file")
+                                      : QStringLiteral("Renamed %1 files").arg(plan.changed);
     emit finished(id, entry);
 }
 
