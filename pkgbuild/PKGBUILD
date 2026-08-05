@@ -14,7 +14,9 @@ license=('MIT')
 # fd is the only hard runtime dependency beyond Qt and the portal: recursive search
 # shells out to it (§2).
 depends=('qt6-base' 'qt6-declarative' 'qt6-svg' 'fd' 'xdg-utils')
-makedepends=('qt6-tools')
+# No makedepends beyond the depends above: qmake6, moc and rcc ship with qt6-base and
+# qmlcachegen with qt6-declarative. qt6-tools was listed here and is not used by
+# anything — it made every AUR build pull in a package it did not need.
 
 # Everything omafile detects at startup and hides rather than failing on (§2). None of
 # these are needed to browse, act on, or search local files.
@@ -44,6 +46,14 @@ check() {
   make -j"$(nproc)"
   # Headless: the suite runs under QCoreApplication and needs no display.
   QT_QPA_PLATFORM=offscreen "$startdir/../build/tests/tst_omafile"
+
+  # The QML suite is a second binary — it needs a QGuiApplication and a scene graph where
+  # the one above deliberately has neither. Software rendering so it needs no GPU either.
+  cd qml
+  qmake6 qml.pro
+  make -j"$(nproc)"
+  QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software \
+    "$startdir/../build/tests/tst_omafile_qml"
 }
 
 package() {

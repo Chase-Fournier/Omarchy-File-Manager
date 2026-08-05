@@ -13,7 +13,7 @@ convention, it can't be rebound, it's slow to open, and it doesn't look like the
 Quattro. omafile is the file manager that behaves like the rest of the desktop.
 
 It reads Omarchy's theme and re-colours itself the instant you run `omarchy theme set`. It
-opens in about 100 ms. It uses the same Nerd Font glyphs as your terminal. Every letter
+opens in about 110 ms. It uses the same Nerd Font glyphs as your terminal. Every letter
 key you press filters the directory, exactly like the launcher.
 
 ## Install
@@ -91,6 +91,27 @@ selected" is to start typing its name. Everything else is modified or an arrow k
 
 That table is generated from the same list that binds the keys, so it cannot drift.
 
+## Mouse
+
+The keyboard is the point, but the mouse is not second-class.
+
+**Right-click** a file, the empty space below the list, the space beside the breadcrumb, or
+a place in the sidebar. Entries that do not apply are greyed out rather than hidden, so the
+menu never moves under you. Most entries are the same verbs the keys above run; a few —
+"New file", and the ones that open a config — exist only here, because they have no
+natural key. A sidebar entry offers the file that governs it: `~/.ssh/config` for a host,
+`rclone config` for a remote, `config.toml` for anything else.
+
+Clicking away closes the menu **and** does whatever that click would have done — a stray
+right-click costs nothing.
+
+**Drag** a file onto a folder to move it there, out to another application, or in from one.
+Hold over a folder for a moment and it opens, so you can drag into a tree you cannot see;
+hold over a **breadcrumb** and it goes back up, which is how you get out again — or drop
+straight onto a crumb to send something several levels up without letting go. `Ctrl`
+forces a copy, `Shift` forces a move; otherwise it moves within a filesystem and copies
+across one.
+
 ## Remote
 
 SSH hosts come from `~/.ssh/config` — omafile keeps no host list of its own, so keys,
@@ -158,14 +179,19 @@ search).
 
 ```bash
 ./bin/build     # qmake6 && make -> build/omafile
-./bin/test      # every suite, plus the performance budgets
+./bin/test      # both suites, plus the performance budgets
 ```
+
+Two test binaries: `tst_omafile` is headless C++ under `QCoreApplication`, and
+`tst_omafile_qml` drives the QML components with real clicks and keystrokes — offscreen
+and software-rendered, so it needs neither a display nor a GPU. `bin/test` builds and runs
+both.
 
 The budgets are tests, not aspirations — `bin/test` fails if they regress.
 
 | Metric | Budget | Actual |
 |---|---|---|
-| Cold start to first paint | < 140 ms | ~100 ms |
+| Cold start to first paint | < 140 ms | ~110 ms |
 | 10k-entry directory | < 150 ms | ~7 ms |
 | Keystroke → filtered list | < 5 ms | ~1 ms |
 | First search result | < 30 ms | ~3 ms |

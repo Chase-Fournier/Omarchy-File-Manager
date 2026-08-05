@@ -5,9 +5,13 @@ import Omafile
 //
 // Split out of Main.qml because it is the one part of the window that is pure data: no
 // layout, no geometry, no focus. Every entry is `{ label, action, enabled, separator }`
-// and every action is an arrow function onto a verb the window already has, so a menu can
-// never do something the keyboard cannot, and there is exactly one implementation of each
-// operation to keep correct.
+// and every action is an arrow function onto a verb the window already implements, so
+// there is exactly one implementation of each operation to keep correct.
+//
+// Most of those verbs are also bound to a key. Not all: "New file", the two config
+// entries, "Connect in a terminal" and "Remove bookmark" live only here, because none of
+// them has a natural shortcut and inventing one to preserve a symmetry nobody asked for
+// would cost a key that a more common verb should have.
 QtObject {
     id: menus
 

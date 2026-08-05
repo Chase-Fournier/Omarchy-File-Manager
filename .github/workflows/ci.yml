@@ -16,7 +16,7 @@ jobs:
         run: |
           pacman -Syu --noconfirm \
             base-devel git \
-            qt6-base qt6-declarative qt6-svg qt6-tools \
+            qt6-base qt6-declarative qt6-svg \
             fd ripgrep
 
       - uses: actions/checkout@v4

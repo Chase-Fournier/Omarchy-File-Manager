@@ -142,10 +142,16 @@ in at startup, and §12's budget (already the tightest number in the project) ha
 for a feature only reached on demand. The cost is about 90 lines and re-implementing
 keyboard navigation, which the rest of the app needs anyway.
 
-**Every entry calls a verb that already has a shortcut.** `menuForRow` and friends build
-arrays of `{ label, action, enabled, separator }` where each `action` is an arrow function
-onto an existing `root` function. So the menu can never do something the keyboard cannot,
-and there is exactly one implementation of each operation to keep correct.
+**Every entry calls a verb the window already implements.** `Menus.qml` builds arrays of
+`{ label, action, enabled, separator }` where each `action` is an arrow function onto an
+existing `root` function, so there is exactly one implementation of each operation to keep
+correct.
+
+It was claimed here — and in `README.md` — that every entry also has a keyboard shortcut.
+That was never true: "New file", "Edit ~/.ssh/config", "Edit omafile config", "Connect in
+a terminal" and "Remove bookmark" have no key and never did. Adding keys to make the
+sentence true would spend five shortcuts on verbs nobody reaches for daily, so the
+sentence was corrected instead.
 
 **Disabled rather than hidden** for entries that do not apply — "Open with…" on a
 directory, "Move to trash" on a network mount (§10.6 has no dependable trash there),
