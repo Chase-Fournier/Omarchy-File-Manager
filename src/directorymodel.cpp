@@ -8,6 +8,7 @@
 #include "watcher.h"
 
 #include <QDateTime>
+#include <QDir>
 
 namespace {
 
@@ -181,6 +182,11 @@ QVariant DirectoryModel::data(const QModelIndex &index, int role) const
     default:
         return {};
     }
+}
+
+QString DirectoryModel::homePath()
+{
+    return QDir::homePath();
 }
 
 void DirectoryModel::setLocation(const Location &location)

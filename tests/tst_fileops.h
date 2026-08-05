@@ -38,6 +38,7 @@ private slots:
     void sameFilesystemMoveKeepsInode();
     void renameRejectsInvalidNames();
     void newFolderRefusesToClobber();
+    void newFileNeverTruncates();
 
     void journalIsBounded();
     void undoRestoresTrashedFiles();

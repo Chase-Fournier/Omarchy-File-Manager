@@ -25,6 +25,8 @@ Item {
 
             required property int index
             required property string name
+            required property string target
+            required property int kind
             required property string glyph
             required property string note
             required property bool available
@@ -47,12 +49,17 @@ Item {
 
             MouseArea {
                 anchors.fill: parent
-                acceptedButtons: Qt.LeftButton | Qt.MiddleButton
+                acceptedButtons: Qt.LeftButton | Qt.MiddleButton | Qt.RightButton
                 onClicked: function (event) {
-                    if (event.button === Qt.MiddleButton && place.ejectable)
+                    if (event.button === Qt.RightButton) {
+                        const point = mapToItem(app.contentItem, event.x, event.y)
+                        app.menuForPlace(place.index, place.kind, place.name, place.target,
+                                         place.mounted, place.ejectable, point.x, point.y)
+                    } else if (event.button === Qt.MiddleButton && place.ejectable) {
                         Places.eject(place.index)
-                    else
+                    } else {
                         Places.activate(place.index)
+                    }
                 }
             }
 

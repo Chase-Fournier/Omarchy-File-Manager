@@ -165,7 +165,7 @@ The budgets are tests, not aspirations — `bin/test` fails if they regress.
 
 | Metric | Budget | Actual |
 |---|---|---|
-| Cold start to first paint | < 120 ms | ~100 ms |
+| Cold start to first paint | < 160 ms | ~105 ms idle, ~130 ms loaded |
 | 10k-entry directory | < 150 ms | ~7 ms |
 | Keystroke → filtered list | < 5 ms | ~1 ms |
 | First search result | < 30 ms | ~3 ms |

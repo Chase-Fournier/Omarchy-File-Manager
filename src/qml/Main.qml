@@ -21,7 +21,7 @@ Window {
     property bool editingPath: false
     property int renamingRow: -1
     readonly property bool overlayActive: overlay.visible || Ops.conflictActive
-                                          || help.visible
+                                          || help.visible || contextMenu.visible
     readonly property int pageStep: Math.max(1, Math.floor(list.height / rowHeight) - 1)
 
     function luma(c) { return 0.299 * c.r + 0.587 * c.g + 0.114 * c.b }
@@ -63,6 +63,102 @@ Window {
     function extendSelection(delta) { Dir.extendSelection(delta) }
     function openTerminal() { Ops.openTerminal(Dir.path) }
     function showHelp() { help.open() }
+
+    // ── Right-click menus ────────────────────────────────────────────
+    // Every entry calls a verb that already exists for a shortcut, so the menu can never
+    // do something the keyboard cannot.
+
+    function menuForRow(index, x, y) {
+        if (index !== Dir.currentIndex) {
+            Dir.clearSelection()
+            Dir.currentIndex = index
+        }
+        const isDir = Dir.rowIsDir(index)
+        const remote = Ops.isRemote(Dir.rowPath(index))
+
+        contextMenu.openAt(x, y, [
+            { label: "Open", action: () => Dir.activate(index) },
+            { label: "Open in new window", action: () => Dir.activateInNewWindow(index) },
+            { label: "Open with…", enabled: !isDir, action: () => openWith() },
+            { separator: true },
+            { label: "Cut", action: () => cut() },
+            { label: "Copy", action: () => copy() },
+            { label: "Paste", enabled: isDir && Ops.canPaste,
+              action: () => Ops.paste(Dir.rowPath(index)) },
+            { label: "Copy path", action: () => copyPath() },
+            { separator: true },
+            { label: "Rename", action: () => beginRename() },
+            { label: "Bulk rename in $EDITOR", action: () => bulkRename() },
+            { separator: true },
+            // §10.6: no dependable trash on a network mount, so do not offer it there.
+            { label: "Move to trash", enabled: !remote, action: () => trash() },
+            { label: "Delete permanently", action: () => confirmDelete() },
+            { separator: true },
+            { label: "Terminal here",
+              action: () => Ops.openTerminal(isDir ? Dir.rowPath(index) : Dir.path) },
+        ])
+    }
+
+    function menuForBlankSpace(x, y) {
+        contextMenu.openAt(x, y, [
+            { label: "New file", action: () => promptNewFile() },
+            { label: "New folder", action: () => promptNewFolder() },
+            { separator: true },
+            { label: "Paste", enabled: Ops.canPaste, action: () => paste() },
+            { label: "Select all", action: () => Dir.selectAll() },
+            { separator: true },
+            { label: Dir.showHidden ? "Hide hidden files" : "Show hidden files",
+              action: () => toggleHidden() },
+            { label: "Terminal here", action: () => openTerminal() },
+            { label: "Refresh", action: () => refresh() },
+        ])
+    }
+
+    // Right-clicking a place. The "config" entries open the file that actually governs
+    // that place, rather than omafile inventing a settings screen for it (§1).
+    function menuForPlace(index, kind, name, target, mounted, ejectable, x, y) {
+        const home = Dir.homePath
+        let entries = [
+            { label: "Open", action: () => Places.activate(index) },
+            { label: "Open in new window", enabled: kind !== 2 && kind !== 3,
+              action: () => Ops.openInNewWindow(target) },
+            { separator: true },
+        ]
+
+        // 2 = SshHost, 3 = RcloneRemote, 4 = Volume, 1 = Bookmark (Place::Kind).
+        if (kind === 2) {
+            entries.push({ label: "Edit ~/.ssh/config",
+                           action: () => Ops.openAtLine(home + "/.ssh/config", 1) })
+            entries.push({ label: "Connect in a terminal",
+                           action: () => Places.connectInTerminal(target) })
+        } else if (kind === 3) {
+            entries.push({ label: "Run rclone config",
+                           action: () => Ops.runInTerminal("rclone config") })
+        } else if (kind === 1) {
+            entries.push({ label: "Remove bookmark",
+                           action: () => Places.removeBookmark(target) })
+        }
+
+        if (mounted || ejectable)
+            entries.push({ label: "Eject / unmount", action: () => Places.eject(index) })
+
+        entries.push({ separator: true })
+        entries.push({ label: "Edit omafile config",
+                       action: () => Ops.openAtLine(Settings.configPath, 1) })
+
+        contextMenu.openAt(x, y, entries)
+    }
+
+    function promptNewFile() {
+        overlay.mode = "text"
+        overlay.label = "New file"
+        overlay.initialText = ""
+        overlay.secret = false
+        overlay.stacked = false
+        overlay.offerApplyToAll = false
+        overlay.pending = "newFile"
+        overlay.open()
+    }
     function togglePreview() { Settings.preview = !Settings.preview }
 
     // Ctrl+Enter: pick the application rather than accepting xdg-open's default (§5).
@@ -616,6 +712,8 @@ Window {
                 height: root.rowHeight
 
                 Row {
+                    id: crumbs
+
                     anchors.verticalCenter: parent.verticalCenter
                     visible: !root.editingPath
                     spacing: 0
@@ -649,6 +747,25 @@ Window {
                                 }
                             }
                         }
+                    }
+                }
+
+                // The empty run to the right of the last crumb still *is* this directory,
+                // so it offers the same menu the blank space below the list does — it is
+                // the nearest thing to a title bar, and that is where a right-click looks
+                // for "new file" when the list is full to the bottom.
+                MouseArea {
+                    anchors.left: crumbs.right
+                    anchors.right: parent.right
+                    anchors.top: parent.top
+                    anchors.bottom: parent.bottom
+                    // Not while Ctrl+L has the path open for editing: the field covers
+                    // this whole strip and a right-click there belongs to the field.
+                    visible: !root.editingPath
+                    acceptedButtons: Qt.RightButton
+                    onClicked: function (event) {
+                        const point = mapToItem(root.contentItem, event.x, event.y)
+                        root.menuForBlankSpace(point.x, point.y)
                     }
                 }
 
@@ -696,6 +813,17 @@ Window {
             }
 
             // ── List ──────────────────────────────────────────────────────
+            // Behind the list on purpose: a row handles its own right-click, so only
+            // genuinely empty space reaches this.
+            MouseArea {
+                anchors.fill: list
+                acceptedButtons: Qt.RightButton
+                onClicked: function (event) {
+                    const point = mapToItem(root.contentItem, event.x, event.y)
+                    root.menuForBlankSpace(point.x, point.y)
+                }
+            }
+
             ListView {
                 id: list
 
@@ -973,6 +1101,12 @@ Window {
     // ── Modal surfaces ───────────────────────────────────────────────
     // Declared after the list on purpose: QML paints in declaration order, so anything
     // that covers the content has to come after it.
+    ContextMenu {
+        id: contextMenu
+
+        app: root
+    }
+
     HelpOverlay {
         id: help
 
@@ -994,6 +1128,8 @@ Window {
         onAccepted: function (text) {
             if (pending === "newFolder")
                 Ops.newFolder(Dir.path, text)
+            else if (pending === "newFile")
+                Ops.newFile(Dir.path, text)
             else if (pending === "connect")
                 Places.connectTo(text)
             else if (pending === "password")

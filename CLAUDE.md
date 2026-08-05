@@ -93,16 +93,69 @@ staged tree; `desktop-file-validate` passes with no warnings.
 
 | Budget | Target | Actual |
 |---|---|---|
-| Cold start to first paint | < 120 ms | **112 ms** median (7 runs) |
+| Cold start to first paint | < 160 ms | **104 ms** median idle, ~130 ms loaded |
 | 10k-entry directory, complete | < 150 ms | **7 ms** |
 | Keystroke → filtered list | < 5 ms | **1 ms** (fuzzy, 10k entries) |
 | First search result (§6) | < 30 ms | **3 ms** |
 | 100k-file tree walked (§6) | < 400 ms | **61 ms** |
 | RSS, idle, one window | < 90 MB | **131 MB** ✗ — see below |
 
+### Right-click menus ✅ (post-M6, requested)
+Three menus, all in `src/qml/ContextMenu.qml`: one for a row, one for blank space, one for
+a sidebar place. Verified by screenshot; `FileOps::makeFile` is covered by
+`tst_fileops::newFileNeverTruncates`. 197 tests pass.
+
 ---
 
 ## Decisions
+
+### Right-click menus
+
+**Plain QtQuick, not QtQuick.Controls' `Menu`.** Importing Controls pulls its style plugin
+in at startup, and §12's budget (already the tightest number in the project) has no room
+for a feature only reached on demand. The cost is about 90 lines and re-implementing
+keyboard navigation, which the rest of the app needs anyway.
+
+**Every entry calls a verb that already has a shortcut.** `menuForRow` and friends build
+arrays of `{ label, action, enabled, separator }` where each `action` is an arrow function
+onto an existing `root` function. So the menu can never do something the keyboard cannot,
+and there is exactly one implementation of each operation to keep correct.
+
+**Disabled rather than hidden** for entries that do not apply — "Open with…" on a
+directory, "Move to trash" on a network mount (§10.6 has no dependable trash there),
+"Paste" with an empty clipboard. A menu whose items move around between openings cannot be
+learned.
+
+**The "config" entries open the file, not a settings screen** (§1 rules out a settings UI).
+An SSH host offers `~/.ssh/config`, an rclone remote offers `rclone config` in a terminal,
+and every place offers omafile's own `config.toml` via the new `Settings.configPath`.
+
+**`New file` uses `O_EXCL`**, not `QFile::open(WriteOnly)`, which truncates. The context
+menu puts "New file" one click away from any directory, so a name collision must fail
+rather than silently empty whatever was there. `tst_fileops::newFileNeverTruncates` pins
+both halves of that.
+
+**The empty run to the right of the breadcrumb opens the blank-space menu too.** It is the
+nearest thing this window has to a title bar, and it is where a right-click goes looking
+for "New file" when the list is full to the bottom and there is no blank space left in it.
+The strip is anchored `crumbs.right → parent.right`, so it starts exactly where the last
+segment ends and never swallows a right-click meant for a crumb — verified by probe at
+steady state, because at construction the breadcrumb has no width yet and the strip
+momentarily spans the whole header. It is hidden while `Ctrl+L` has the path open for
+editing, since the field covers that strip and the click belongs to the field.
+
+**Two QML traps this hit, both worth remembering:**
+
+- **`TextMetrics` has no `implicitWidth`.** It exposes `width`/`advanceWidth`. Reading the
+  wrong one yields `undefined`, which propagates through arithmetic to a `NaN` width — and
+  a `NaN`-wide item renders at zero with *no* warning. The menu opened correctly, took
+  focus, and was simply invisible. Anything sized off a measured string should be checked
+  against a probe print, not assumed.
+- **The keep-inside-the-window clamp has to be a binding on the panel, not a calculation
+  in `openAt()`.** At the moment `openAt` runs, the panel has not been laid out, so its
+  height still reads as empty and the clamp does nothing. As a binding it corrects itself
+  once the real size arrives. This is the same layout-timing class of bug as the drag badge
+  and the Overlay focus grab — the third instance in this project.
 
 ### Theme (M0)
 
@@ -588,7 +641,33 @@ It cost most of an afternoon chasing phantom bugs: several "broken" features wer
 working once the dispatch actually arrived, and F2 and Ctrl+1 never arrive at all. Do not
 trust it as evidence that something is broken; confirm with logging before believing it.
 
-**Startup headroom is thinning:** 112 ms against 120 ms, up from 104 ms in M1.
+**The startup budget was raised from 120 ms to 160 ms** (§12, `bin/test`, `README.md`) at
+the user's request, after `bin/test` began failing it about half the time. Do not read the
+new number as 40 ms of slack for the code — read it as the width of the measurement.
+Medians of 11–15 samples taken minutes apart on the same binary: **104, 119, 123, 132,
+148 ms**, with individual outliers to 580 ms whenever something else grabbed the CPU. An
+idle bench says 104; this machine's ordinary working state (Chrome, an editor, a language
+server, load ~2.2) says 120–150. 140 was tried first and still flapped, so it is 160: a
+budget that fails half the time on a machine doing nothing wrong teaches you to ignore it,
+which is worse than not having one.
+
+What that buys is a regression test that only fires on a real regression. It does not
+excuse the creep — 86 ms at M0 to ~104 ms idle now — and profiling what is constructed
+before first paint is still the honest fix. Judge that on a settled machine only.
+
+**No right-click has been synthesized — only the menus' rendering was verified.** There is
+no `ydotool`/`wtype`/`dotool` on this machine, so all three menus were opened by
+temporarily rebinding F1 to `menuForRow`/`menuForBlankSpace`/`menuForPlace` and
+screenshotting. That proves the panels build, size, populate and grey out the right rows.
+What it does not prove is the plumbing that gets there: `EntryRow`'s right-button branch,
+the blank-space `MouseArea` declared *before* the ListView, the strip beside the
+breadcrumb, and `Sidebar`'s place handler — including whether the click coordinates land
+where the pointer is. Right-click each of those four surfaces once by hand.
+
+**The menu actions have not been clicked.** Their callees are all confirmed to exist and be
+`Q_INVOKABLE`, and each one is a verb that already works from the keyboard, but the
+arrow functions are lazy — an argument-order mistake inside one would not surface until
+that row is chosen. "New file" is the one exception, now covered headlessly.
 
 **§16.3 is still open.** `Space` toggles selection (launcher-like) rather than extending
 it. The plan says try both for a week.
@@ -607,9 +686,10 @@ committing". That measurement cannot be made here — there is no sshfs, no test
 speculative work against an unresolved decision. It needs a real remote box and a week of
 using M4a first.
 
-**The sidebar has never been seen.** `Ctrl+B` was wired and the build runs clean, but the
-session locked before it could be captured. Everything behind it is unit-tested; the
-rendering is not.
+**~~The sidebar has never been seen.~~ It has now** — captured while screenshotting the
+context menus: home, Downloads, Documents, Pictures, then the SSH hosts and remotes, all
+rendering with the right glyphs and indentation. What is still unseen is its *behaviour*:
+`Ctrl+B` toggling, clicking a place, and the right-click menu reaching it.
 
 **Connecting blocks the GUI thread** for as long as the ssh probe plus the mount takes —
 bounded at roughly 8 s by `ConnectTimeout`, but still a freeze. Mounting should move to a
@@ -641,10 +721,10 @@ really §16.7's open question; the machinery is ready either way.
 **Open-with has not been driven by hand.** The parsing is tested, but the chooser overlay
 has never been opened against a real MIME type.
 
-**Startup has crept: 86 ms at M0, ~105 ms now**, and the margin against the 120 ms budget
-is thin. The measurement is extremely sensitive to machine load — the same binary measures
-95 ms idle and 167 ms immediately after a `makepkg` run. Judge it only on a settled
-machine, and take the median of a dozen samples, not three.
+**Startup has crept: 86 ms at M0, ~104 ms now** — see the budget note above. The
+measurement is extremely sensitive to machine load: the same binary measures 95 ms idle
+and 167 ms immediately after a `makepkg` run. Judge it only on a settled machine, and take
+the median of a dozen samples, not three.
 
 **Bulk rename's `$EDITOR` round trip has not been run by hand.** The planning is covered by
 19 tests including on-disk replay, but launching a terminal, editing, and applying the

@@ -7,6 +7,7 @@
         <file>qml/Sidebar.qml</file>
         <file>qml/Overlay.qml</file>
         <file>qml/HelpOverlay.qml</file>
+        <file>qml/ContextMenu.qml</file>
         <file>qml/PreviewPane.qml</file>
     </qresource>
 </RCC>

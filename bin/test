@@ -18,7 +18,7 @@ cd "$(dirname "$0")/.."
 # then deletes a 100k-file tree, and measuring cold start while the kernel is still
 # working through that produced a phantom 60 ms regression and 600 ms outliers.
 measure_startup() {
-  local budget_ms=120
+  local budget_ms=160
   local samples=()
   local reading
 

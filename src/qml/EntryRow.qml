@@ -49,7 +49,7 @@ Item {
         id: mouse
 
         anchors.fill: parent
-        acceptedButtons: Qt.LeftButton
+        acceptedButtons: Qt.LeftButton | Qt.RightButton
         // The ListView is a Flickable and will otherwise steal the press to scroll,
         // which both turns a file drag into a scroll and kills the drag before it starts.
         // Dragging a row means dragging the file; the wheel scrolls.
@@ -78,6 +78,11 @@ Item {
         }
 
         onClicked: function (event) {
+            if (event.button === Qt.RightButton) {
+                const point = mapToItem(app.contentItem, event.x, event.y)
+                app.menuForRow(row.index, point.x, point.y)
+                return
+            }
             if (event.modifiers & Qt.ShiftModifier) {
                 Dir.selectTo(row.index)
                 return

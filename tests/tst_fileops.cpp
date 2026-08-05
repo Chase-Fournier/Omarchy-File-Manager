@@ -432,6 +432,32 @@ void TestFileOps::newFolderRefusesToClobber()
     QCOMPARE(entry.kind, JournalEntry::Created);
 }
 
+// The one thing "new file" must never do is empty a file that was already there — the
+// context menu makes it a single click away from any directory the user is looking at.
+void TestFileOps::newFileNeverTruncates()
+{
+    write(QStringLiteral("work/notes.txt"), QByteArrayLiteral("please keep me"));
+
+    QString failure;
+    runOperation([&](FileOps *ops, quint64 id) {
+        ops->makeFile(path(QStringLiteral("work")), QStringLiteral("notes.txt"), id);
+    }, &failure);
+    QVERIFY(!failure.isEmpty());
+    QCOMPARE(readAll(path(QStringLiteral("work/notes.txt"))), QByteArrayLiteral("please keep me"));
+
+    const JournalEntry entry = runOperation([&](FileOps *ops, quint64 id) {
+        ops->makeFile(path(QStringLiteral("work")), QStringLiteral("blank.txt"), id);
+    }, &failure);
+    QVERIFY2(failure.isEmpty(), qPrintable(failure));
+
+    const QFileInfo made(path(QStringLiteral("work/blank.txt")));
+    QVERIFY(made.isFile());
+    QCOMPARE(made.size(), 0);
+    QCOMPARE(entry.kind, JournalEntry::Created);
+    // Undo has to know what to remove, or the menu creates litter nothing can clear.
+    QCOMPARE(entry.created, QStringList({ path(QStringLiteral("work/blank.txt")) }));
+}
+
 void TestFileOps::journalIsBounded()
 {
     Journal journal;

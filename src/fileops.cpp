@@ -511,6 +511,32 @@ void FileOps::makeDirectory(const QString &parentDir, const QString &name, quint
     emit finished(id, entry);
 }
 
+void FileOps::makeFile(const QString &parentDir, const QString &name, quint64 id)
+{
+    beginOperation();
+
+    const QString target = joinPath(parentDir, name);
+    if (QFileInfo::exists(target)) {
+        emit failed(id, QStringLiteral("%1 already exists").arg(name));
+        return;
+    }
+
+    // O_EXCL so a file that appeared between the check and here is never truncated.
+    const int fd = ::open(QFile::encodeName(target).constData(),
+                          O_WRONLY | O_CREAT | O_EXCL, 0644);
+    if (fd < 0) {
+        emit failed(id, errorString());
+        return;
+    }
+    ::close(fd);
+
+    JournalEntry entry;
+    entry.kind = JournalEntry::Created;
+    entry.created.append(target);
+    entry.summary = QStringLiteral("Created %1").arg(name);
+    emit finished(id, entry);
+}
+
 void FileOps::renameEntry(const QString &path, const QString &newName, quint64 id)
 {
     beginOperation();

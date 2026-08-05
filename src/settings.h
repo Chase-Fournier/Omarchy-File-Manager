@@ -20,6 +20,8 @@ class Settings : public QObject
 
     Q_PROPERTY(bool sidebar READ sidebar WRITE setSidebar NOTIFY changed)
     Q_PROPERTY(bool preview READ preview WRITE setPreview NOTIFY changed)
+    // So the sidebar menu can open the file that governs all this.
+    Q_PROPERTY(QString configPath READ configPath CONSTANT)
 
 public:
     explicit Settings(QObject *parent = nullptr);

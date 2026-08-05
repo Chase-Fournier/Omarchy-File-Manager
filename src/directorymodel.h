@@ -26,6 +26,7 @@ class DirectoryModel : public QAbstractListModel
     Q_PROPERTY(QString displayPath READ displayPath NOTIFY locationChanged)
     Q_PROPERTY(QStringList segments READ segments NOTIFY locationChanged)
     Q_PROPERTY(bool atRoot READ atRoot NOTIFY locationChanged)
+    Q_PROPERTY(QString homePath READ homePath CONSTANT)
 
     Q_PROPERTY(int count READ count NOTIFY countsChanged)
     Q_PROPERTY(int totalCount READ totalCount NOTIFY countsChanged)
@@ -75,6 +76,7 @@ public:
     QString displayPath() const { return m_location.displayPath(); }
     QStringList segments() const { return m_location.segments(); }
     bool atRoot() const { return m_location.isRoot(); }
+    static QString homePath();
 
     int count() const { return int(m_rows.size()); }
     int totalCount() const { return int(m_all.size()); }

@@ -208,6 +208,35 @@ void Operations::newFolder(const QString &parentDir, const QString &name)
                               Q_ARG(quint64, operation));
 }
 
+void Operations::newFile(const QString &parentDir, const QString &name)
+{
+    if (parentDir.isEmpty() || name.isEmpty())
+        return;
+    const quint64 operation = begin();
+    QMetaObject::invokeMethod(m_ops, "makeFile", Qt::QueuedConnection,
+                              Q_ARG(QString, parentDir), Q_ARG(QString, name),
+                              Q_ARG(quint64, operation));
+}
+
+void Operations::runInTerminal(const QString &command, const QString &workingDir)
+{
+    const QString terminal = findTerminal();
+    if (terminal.isEmpty()) {
+        setStatus(QStringLiteral("no terminal found"));
+        return;
+    }
+
+    QProcess process;
+    process.setProgram(terminal);
+    // Held open afterwards so anything the command printed can actually be read.
+    process.setArguments({ QStringLiteral("-e"), QStringLiteral("sh"), QStringLiteral("-c"),
+                           command + QStringLiteral("; echo; echo '[press enter to close]'; "
+                                                    "read _") });
+    if (!workingDir.isEmpty())
+        process.setWorkingDirectory(workingDir);
+    process.startDetached();
+}
+
 void Operations::rename(const QString &path, const QString &newName)
 {
     if (path.isEmpty() || newName.isEmpty())
@@ -392,6 +421,11 @@ void Operations::reportStatus(const QString &message)
 {
     if (!message.isEmpty())
         setStatus(message);
+}
+
+void Operations::openInNewWindow(const QString &location)
+{
+    Opener::openInNewWindow(location);
 }
 
 void Operations::openTerminal(const QString &directory)

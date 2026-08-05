@@ -50,6 +50,10 @@ public:
     Q_INVOKABLE void trash(const QStringList &paths);
     Q_INVOKABLE void deletePermanently(const QStringList &paths);
     Q_INVOKABLE void newFolder(const QString &parentDir, const QString &name);
+    Q_INVOKABLE void newFile(const QString &parentDir, const QString &name);
+    // Runs a command in the user's terminal. Used for things that are interactive by
+    // nature — `rclone config`, editing a dotfile — rather than reimplemented here.
+    Q_INVOKABLE void runInTerminal(const QString &command, const QString &workingDir = QString());
     Q_INVOKABLE void rename(const QString &path, const QString &newName);
     // §9: writes the names to a temp file, opens $EDITOR on it, and applies the diff when
     // the editor exits. Regex rename, numbering, case changes and sorting for free.
@@ -69,6 +73,7 @@ public:
     Q_INVOKABLE void resolveConflict(int choice, bool applyToAll);
     Q_INVOKABLE void cancel();
     Q_INVOKABLE void openTerminal(const QString &directory);
+    Q_INVOKABLE void openInNewWindow(const QString &location);
     // Lets Places report through the one status line rather than growing its own.
     Q_INVOKABLE void reportStatus(const QString &message);
     // A content-search hit: $EDITOR at that line, in a terminal. Falls back to xdg-open
