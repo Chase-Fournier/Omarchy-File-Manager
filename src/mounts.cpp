@@ -179,6 +179,18 @@ QString sshHostFor(const QString &path)
     return {};
 }
 
+bool isOwnMountRoot(const QString &path)
+{
+    if (path.isEmpty() || !path.startsWith(runtimeMountRoot()))
+        return false;
+    const QList<MountPoint> mounts = current();
+    for (const MountPoint &mount : mounts) {
+        if (mount.path == path)
+            return true;
+    }
+    return false;
+}
+
 QString runtimeMountRoot()
 {
     QString runtime = QString::fromLocal8Bit(qgetenv("XDG_RUNTIME_DIR"));

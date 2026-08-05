@@ -235,6 +235,45 @@ because the name genuinely cannot be recovered from them.
 the whole config entry with it — `ProxyJump`, `IdentityFile`, `Match` — and reconstructing
 a target from parsed fields would silently throw all of that away.
 
+**gvfs is only used for hosts omafile knows nothing about.** A host written down in
+`~/.ssh/config` may carry an `IdentityFile`, a `ProxyJump` or a `Match` block, and **gvfs
+reads none of that** — it would connect with the wrong key or the wrong user and fail.
+Those go through real ssh/sshfs, which honours the whole entry. gvfs is reserved for hosts
+known only from `known_hosts` or typed as a URI, where there is no configuration to lose
+and its password dialogs are the only way in. `SshHost::needsOpenSsh()` is the check.
+
+**A host with no config entry cannot be connected to, and that is correct.** omafile keeps
+no host list of its own (§10.1): it reads OpenSSH's. A machine present only in
+`known_hosts` has no user and no key recorded anywhere, so the fix is a `Host` block —
+which then works for `ssh`, `scp` and `rsync` too, not just here.
+
+**The mount is `host:/`, the remote root — not `host:`, which is only the remote home.**
+§10.1 says root, and it matters twice: with a home-rooted mount there is nothing above
+`/home/<user>` to navigate to, and `ssh://host/etc/nginx` would resolve to `~/etc/nginx`
+instead of `/etc/nginx`. Opening a host still *lands* in the remote home when it can be
+identified, because a filesystem root is a useless place to arrive; the rest of the
+machine is then simply up.
+
+**An omafile-made mount root is a navigation boundary.** Walking up past it led into
+`$XDG_RUNTIME_DIR/omafile`, which is plumbing rather than a place. The mount root *is*
+"the server", so `goParent` stops there like it stops at `/`.
+
+**Remote-side search falls back to a bounded local walk.** §10.1 runs `ssh host fd`, but
+plenty of servers have no `fd` installed. When the remote command fails and returns
+nothing, omafile walks the mount itself with `--max-depth 6` — §10.6's "bounded
+depth-limited walk", never an unbounded crawl over a slow link. A depth-limited walk is
+deliberately not cached as complete.
+
+**Orphaned mounts are swept at startup.** A window killed with SIGTERM never runs its
+destructor, so its claim and its mount survive it. On start, any mount whose claimants are
+all dead processes is unmounted and its refcount directory removed — §14's "no orphaned
+mounts left in $XDG_RUNTIME_DIR after an unclean exit". Verified with a fabricated claim
+from a PID that cannot exist.
+
+**The sidebar's contents are built on first use, not at construction.** Populating it
+costs PATH lookups for sshfs/rclone/gio/udisks, an `~/.ssh/config` parse and a
+`/proc/self/mountinfo` read; a window whose sidebar is closed should pay none of that.
+
 **Mounts are refcounted across windows as one file per PID** in
 `$XDG_RUNTIME_DIR/omafile/.refs/<key>/`. A claim from a process that no longer exists is
 self-evidently stale and gets cleaned up, which is what stops an unclean exit leaving an
@@ -518,7 +557,12 @@ that actually asks for a password. A key *passphrase* (as opposed to a host pass
 additionally need `SSH_ASKPASS`, which is not implemented — `ssh-agent` covers it in
 practice on Omarchy.
 
-**Mounting has never been executed end to end.** Without sshfs or rclone installed, `mountSsh` and
+**~~Mounting has never been executed end to end.~~ It has now** — verified against a real
+Oracle Cloud host: omafile mounted it over sshfs itself, browsed it, and filled in sizes
+and mtimes over the link. The remaining unrun paths are rclone, gio/SMB/WebDAV/MTP, and
+the password prompt (that server is publickey-only).
+
+**Superseded note —** Without sshfs or rclone installed, `mountSsh` and
 `mountRclone` have only ever taken their "not installed" branch. The gio path is likewise
 unrun. The refcount logic, the option strings and the gvfs path resolution are all
 unproven against a real mount.

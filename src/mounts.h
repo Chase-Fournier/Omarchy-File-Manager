@@ -39,6 +39,11 @@ QString networkRootFor(const QString &path);
 // the wire — §10.1 calls it the single biggest reason to build a remote path at all.
 QString sshHostFor(const QString &path);
 
+// True when `path` is the root of a mount omafile itself created. Navigating above one
+// leads only into omafile's runtime plumbing, so it is treated as a boundary — the mount
+// root *is* "the server".
+bool isOwnMountRoot(const QString &path);
+
 // Where omafile puts the mounts it owns: $XDG_RUNTIME_DIR/omafile/...
 QString runtimeMountRoot();
 

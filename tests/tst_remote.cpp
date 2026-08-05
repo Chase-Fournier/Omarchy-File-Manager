@@ -142,6 +142,30 @@ void TestRemote::stopsRunawayIncludes()
     QVERIFY(aliasesOf(hosts).contains(QStringLiteral("looped")));
 }
 
+// gvfs cannot read ~/.ssh/config, so anything configured there has to go through real
+// ssh or the key/jump host would simply be ignored.
+void TestRemote::configuredHostsNeedOpenSsh()
+{
+    const QList<SshHost> hosts = Hosts::parseConfig(QStringLiteral(
+        "Host keyed\n    HostName box\n    IdentityFile ~/.ssh/special\n"
+        "\nHost jumped\n    HostName inner\n    ProxyJump edge\n"
+        "\nHost plain\n    HostName simple\n"), QStringLiteral("/tmp"));
+
+    QCOMPARE(findHost(hosts, QStringLiteral("keyed"))->identityFile,
+             QStringLiteral("~/.ssh/special"));
+    QVERIFY(findHost(hosts, QStringLiteral("keyed"))->needsOpenSsh());
+    QVERIFY(findHost(hosts, QStringLiteral("jumped"))->needsOpenSsh());
+    // Even a plain entry came from the config, which may hold Match blocks we never see.
+    QVERIFY(findHost(hosts, QStringLiteral("plain"))->needsOpenSsh());
+
+    // A host known only from known_hosts carries no configuration, so gvfs — which can
+    // prompt for a password — is the better backend there.
+    const QList<SshHost> known =
+        Hosts::parseKnownHosts(QStringLiteral("casual.example.com ssh-ed25519 AAAA...\n"));
+    QCOMPARE(known.size(), 1);
+    QVERIFY(!known.first().needsOpenSsh());
+}
+
 void TestRemote::parsesKnownHosts()
 {
     const QList<SshHost> hosts = Hosts::parseKnownHosts(QStringLiteral(

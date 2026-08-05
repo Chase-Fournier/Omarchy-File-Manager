@@ -17,6 +17,7 @@ private slots:
     void followsIncludes();
     void stopsRunawayIncludes();
 
+    void configuredHostsNeedOpenSsh();
     void parsesKnownHosts();
     void skipsHashedKnownHosts();
     void parsesBracketedPorts();

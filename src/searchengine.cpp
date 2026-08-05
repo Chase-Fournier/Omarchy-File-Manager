@@ -21,6 +21,9 @@ constexpr int kFlushMs = 16;
 constexpr int kCacheCap = 200000;
 // How long to wait for output before re-checking cancellation.
 constexpr int kPollMs = 40;
+// How deep to walk a remote mount when the far end cannot search for itself. Deep enough
+// to be useful, shallow enough that a 40 ms round trip per directory stays bearable.
+constexpr int kRemoteFallbackDepth = 6;
 
 QString executable(const QString &name)
 {
@@ -136,7 +139,8 @@ void SearchEngine::rankCached(const QString &root, const QString &query, quint64
     emit finished(generation, int(m_cache.size()));
 }
 
-void SearchEngine::searchNames(const QString &root, const QString &query, quint64 generation)
+void SearchEngine::searchNames(const QString &root, const QString &query, quint64 generation,
+                               bool allowRemote, int depthLimit)
 {
     const QString program = executable(QStringLiteral("fd"));
     if (program.isEmpty()) {
@@ -156,7 +160,7 @@ void SearchEngine::searchNames(const QString &root, const QString &query, quint6
     // §10.1: walking an sshfs mount is agonising, so when omafile owns the mount the walk
     // runs on the far end and the returned paths are rewritten back into local mount
     // paths. A 30-second remote search becomes a 300 ms one.
-    const QString sshHost = Mounts::sshHostFor(root);
+    const QString sshHost = allowRemote ? Mounts::sshHostFor(root) : QString();
     QString remotePrefix;
     QString localPrefix;
 
@@ -175,8 +179,12 @@ void SearchEngine::searchNames(const QString &root, const QString &query, quint6
                                    .arg(fdArguments.join(QLatin1Char(' ')),
                                         QStringLiteral("'%1'").arg(remotePrefix)) });
     } else {
+        QStringList arguments = fdArguments;
+        // §10.6: never silently walk a slow mount to completion. The fallback is bounded.
+        if (depthLimit > 0)
+            arguments << QStringLiteral("--max-depth") << QString::number(depthLimit);
         process.setProgram(program);
-        process.setArguments(QStringList(fdArguments) << root);
+        process.setArguments(arguments << root);
     }
     process.setStandardErrorFile(QProcess::nullDevice());
     process.start();
@@ -266,11 +274,21 @@ void SearchEngine::searchNames(const QString &root, const QString &query, quint6
     if (cancelled(generation))
         return;
 
+    // The far end may not have fd at all — a perfectly ordinary server. Rather than
+    // reporting nothing, walk the mount locally instead, bounded so a slow link cannot
+    // turn a search into a hang (§10.6).
+    if (remote && scanned == 0 && process.exitCode() != 0) {
+        searchNames(root, query, generation, false, kRemoteFallbackDepth);
+        return;
+    }
+
     // Only a complete walk is worth caching; a cancelled one would answer later queries
     // with a truncated tree.
     m_cacheRoot = root;
     m_cache = std::move(cache);
-    m_cacheComplete = m_cache.size() < kCacheCap;
+    // A depth-limited walk did not see the whole tree, so it must not be reused as if
+    // it had.
+    m_cacheComplete = m_cache.size() < kCacheCap && depthLimit == 0;
 
     emit results(generation, best(std::move(hits)));
     emit finished(generation, scanned);

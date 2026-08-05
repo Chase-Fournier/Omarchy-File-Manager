@@ -124,6 +124,8 @@ QList<SshHost> parseConfig(const QString &text, const QString &baseDir, int dept
                 host.port = arguments.toInt() > 0 ? arguments.toInt() : 22;
             else if (keyword == QLatin1String("proxyjump"))
                 host.proxyJump = stripQuotes(arguments);
+            else if (keyword == QLatin1String("identityfile"))
+                host.identityFile = stripQuotes(arguments);
         }
     }
 

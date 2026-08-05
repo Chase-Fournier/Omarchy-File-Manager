@@ -71,7 +71,10 @@ private:
         return m_generation.load(std::memory_order_relaxed) != generation;
     }
 
-    void searchNames(const QString &root, const QString &query, quint64 generation);
+    // `depthLimit` > 0 bounds the walk, which is what the local fallback uses when the
+    // far end has no fd of its own (§10.6).
+    void searchNames(const QString &root, const QString &query, quint64 generation,
+                     bool allowRemote = true, int depthLimit = 0);
     void searchContent(const QString &root, const QString &query, quint64 generation);
     void searchLocate(const QString &query, quint64 generation);
 

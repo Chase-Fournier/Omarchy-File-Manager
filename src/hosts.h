@@ -11,7 +11,15 @@ struct SshHost
     QString user;
     int port = 22;
     QString proxyJump;
+    QString identityFile;
     bool fromKnownHosts = false; // secondary source, so it sorts below configured hosts
+
+    // gvfs does not read ~/.ssh/config. Anything that only lives there — a key, a jump
+    // host, a Match block — means the mount has to go through real ssh instead.
+    bool needsOpenSsh() const
+    {
+        return !fromKnownHosts || !proxyJump.isEmpty() || !identityFile.isEmpty();
+    }
 
     // What `ssh` would be given. The alias is preferred: it carries the whole config
     // entry with it, including ProxyJump and IdentityFile, which a rebuilt user@host

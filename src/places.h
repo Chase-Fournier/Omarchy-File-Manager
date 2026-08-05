@@ -88,6 +88,9 @@ signals:
 
 private:
     void rebuild();
+    // §14: an unclean exit must not leave a mount behind forever. Anything whose only
+    // claimants are dead processes is swept on the next start.
+    void sweepOrphanedMounts();
     void setBusy(bool busy);
 
     // Mount helpers. Each returns the local path the remote now appears at, or empty on
@@ -98,6 +101,9 @@ private:
     // it: it owns the authentication dialogs, so passphrases, host-key trust and
     // keyboard-interactive all just work.
     static bool hasGvfsSftp();
+    static SshHost hostFor(const QString &alias);
+    // Where to open once mounted: the remote home if we can find it, else the mount root.
+    static QString landingPathFor(const QString &mountPath, const SshHost &host);
     QString mountSftpViaGio(const SshHost &host, QString *error);
     // Distinguishes "wrong credentials" from "host is down", so we only prompt when a
     // password could actually help.
@@ -113,6 +119,9 @@ private:
     bool releaseMount(const QString &key); // true when nobody else holds it
     static QString refsDir(const QString &key);
 
+    // §12: the sidebar's contents cost PATH lookups and a config parse, so they are not
+    // built until something actually asks for them.
+    mutable bool m_built = false;
     QList<Place> m_places;
     QStringList m_bookmarks;
     QStringList m_heldMounts;

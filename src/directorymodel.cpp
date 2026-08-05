@@ -3,6 +3,7 @@
 #include "formatting.h"
 #include "fuzzyscorer.h"
 #include "lister.h"
+#include "mounts.h"
 #include "opener.h"
 #include "watcher.h"
 
@@ -673,6 +674,10 @@ void DirectoryModel::navigateToSegment(int segmentIndex)
 void DirectoryModel::goParent()
 {
     if (m_location.isRoot())
+        return;
+    // The root of a mount omafile made is as far up as this goes: above it is only
+    // $XDG_RUNTIME_DIR/omafile, which is plumbing, not a place.
+    if (Mounts::isOwnMountRoot(m_location.localPath()))
         return;
 
     // Select the directory we came out of, so Backspace then Enter is a no-op.

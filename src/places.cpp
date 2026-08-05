@@ -85,7 +85,7 @@ Places::Places(QObject *parent)
                 m_bookmarks.append(line);
         }
     }
-    rebuild();
+    sweepOrphanedMounts();
 }
 
 Places::~Places()
@@ -95,6 +95,8 @@ Places::~Places()
 
 int Places::rowCount(const QModelIndex &parent) const
 {
+    if (!m_built)
+        const_cast<Places *>(this)->rebuild();
     return parent.isValid() ? 0 : int(m_places.size());
 }
 
@@ -146,6 +148,7 @@ void Places::refresh()
 
 void Places::rebuild()
 {
+    m_built = true;
     m_places.clear();
 
     const auto folder = [this](QStandardPaths::StandardLocation location,
@@ -185,6 +188,12 @@ void Places::rebuild()
     QSet<QString> mountedPaths;
     for (const MountPoint &mount : mounted) {
         mountedPaths.insert(mount.path);
+        // A mount omafile made is already listed as the host or remote it came from,
+        // and that entry lights up when it is mounted. Listing it again as a volume
+        // showed the same machine twice.
+        if (mount.path.startsWith(Mounts::runtimeMountRoot()))
+            continue;
+
         Place place;
         place.kind = Place::Volume;
         place.name = mount.label();
@@ -237,6 +246,45 @@ void Places::setBusy(bool busy)
         return;
     m_busy = busy;
     emit busyChanged();
+}
+
+// A claim whose process is gone is stale. If every claim on a mount is stale, nobody is
+// using it and it should not still be there — which is what stops a crash or a logout
+// leaving an sshfs mount wedged in the runtime directory (§14).
+void Places::sweepOrphanedMounts()
+{
+    const QString root = Mounts::runtimeMountRoot();
+    const QDir refs(root + QStringLiteral("/.refs"));
+    if (!refs.exists())
+        return;
+
+    const QStringList keys = refs.entryList(QDir::Dirs | QDir::NoDotAndDotDot);
+    for (const QString &key : keys) {
+        const QString dir = refsDir(key);
+        bool live = false;
+        const QStringList claims = QDir(dir).entryList(QDir::Files);
+        for (const QString &claim : claims) {
+            const pid_t pid = claim.toInt();
+            if (pid > 0 && ::kill(pid, 0) == 0) {
+                live = true;
+                continue;
+            }
+            QFile::remove(dir + QLatin1Char('/') + claim);
+        }
+        if (live)
+            continue;
+
+        QDir().rmdir(dir);
+        const QString path = root + QLatin1Char('/') + key;
+        if (!isMountedAt(path))
+            continue;
+
+        QProcess unmount;
+        unmount.setProgram(QStringLiteral("fusermount3"));
+        unmount.setArguments({ QStringLiteral("-u"), path });
+        unmount.start();
+        unmount.waitForFinished(3000);
+    }
 }
 
 QString Places::refsDir(const QString &key)
@@ -372,23 +420,30 @@ QString Places::mountSftpViaGio(const SshHost &host, QString *error)
     return {};
 }
 
-QString Places::mountSsh(const QString &hostAlias, const QString &password, QString *error)
+SshHost Places::hostFor(const QString &alias)
 {
-    // Look the alias up once: ProxyJump decides which backend can even work.
     SshHost host;
-    host.alias = hostAlias;
-    host.hostName = hostAlias;
+    host.alias = alias;
+    host.hostName = alias;
     const QList<SshHost> known = Hosts::all();
     for (const SshHost &candidate : known) {
-        if (candidate.alias == hostAlias) {
-            host = candidate;
-            break;
-        }
+        if (candidate.alias == alias)
+            return candidate;
     }
+    return host;
+}
 
-    // gvfs first, because it can actually ask for credentials — unless the host needs
-    // ProxyJump, which only real ssh (and therefore sshfs) understands.
-    if (password.isEmpty() && host.proxyJump.isEmpty() && hasGvfsSftp()) {
+QString Places::mountSsh(const QString &hostAlias, const QString &password, QString *error)
+{
+    // Look the alias up once: what it carries decides which backend can even work.
+    const SshHost host = hostFor(hostAlias);
+
+    // Which backend depends on where the host came from. A host written down in
+    // ~/.ssh/config may carry an IdentityFile, a ProxyJump or a Match block, none of
+    // which gvfs can see — so those go through real ssh, which honours all of it. A host
+    // known only from known_hosts (or typed as a URI) has no such configuration, and
+    // there gvfs is better because it can actually ask for a password.
+    if (password.isEmpty() && !host.needsOpenSsh() && hasGvfsSftp()) {
         QString gioError;
         const QString path = mountSftpViaGio(host, &gioError);
         if (!path.isEmpty())
@@ -454,8 +509,12 @@ QString Places::mountSsh(const QString &hostAlias, const QString &password, QStr
     else
         options.append(QStringLiteral("password_stdin"));
 
+    // "host:/" — the remote *root*, not "host:" which is only the remote home. §10.1
+    // specifies the root, and it matters twice over: you cannot navigate above the mount
+    // point, and `ssh://host/etc/nginx` has to resolve to the real /etc/nginx rather than
+    // to ~/etc/nginx.
     runCommand(QStringLiteral("sshfs"),
-               { hostAlias + QLatin1Char(':'), target, QStringLiteral("-o"),
+               { hostAlias + QStringLiteral(":/"), target, QStringLiteral("-o"),
                  options.join(QLatin1Char(',')) },
                20000, error, password);
     if (!error->isEmpty()) {
@@ -465,6 +524,22 @@ QString Places::mountSsh(const QString &hostAlias, const QString &password, QStr
 
     claimMount(hostAlias);
     return target;
+}
+
+// The mount is rooted at the remote /, so opening it lands on a filesystem root rather
+// than anywhere useful. If the configured user's home is identifiable, start there — the
+// rest of the machine is then simply *up*, which is what people expect.
+QString Places::landingPathFor(const QString &mountPath, const SshHost &host)
+{
+    if (!host.user.isEmpty()) {
+        const QString home = mountPath + QStringLiteral("/home/") + host.user;
+        if (QFileInfo(home).isDir())
+            return home;
+        if (host.user == QLatin1String("root")
+            && QFileInfo(mountPath + QStringLiteral("/root")).isDir())
+            return mountPath + QStringLiteral("/root");
+    }
+    return mountPath;
 }
 
 QString Places::mountRclone(const QString &remote, QString *error)
@@ -556,9 +631,11 @@ void Places::activate(int row)
 
     setBusy(true);
     QString error;
-    const QString path = place.kind == Place::SshHost
+    QString path = place.kind == Place::SshHost
         ? mountSsh(place.target, QString(), &error)
         : mountRclone(place.target, &error);
+    if (!path.isEmpty() && place.kind == Place::SshHost)
+        path = landingPathFor(path, hostFor(place.target));
     setBusy(false);
 
     if (path.isEmpty()) {
@@ -761,6 +838,8 @@ void Places::connectTo(const QString &input)
             if (host.alias == trimmed) {
                 setBusy(true);
                 path = mountSsh(trimmed, QString(), &error);
+                if (!path.isEmpty())
+                    path = landingPathFor(path, host);
                 setBusy(false);
                 if (path.isEmpty() && looksLikeAuthFailure(error)) {
                     m_pendingHost = trimmed;
