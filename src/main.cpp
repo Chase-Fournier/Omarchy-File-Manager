@@ -2,6 +2,7 @@
 #include "operations.h"
 #include "places.h"
 #include "preview.h"
+#include "settings.h"
 #include "previewimageprovider.h"
 #include "searchmodel.h"
 #include "location.h"
@@ -48,7 +49,13 @@ void printUsage()
     std::printf("omafile [path]\n"
                 "  path              directory or URI to open (default: $PWD)\n"
                 "  --select <file>   open the file's parent and preselect it\n"
-                "  --dump-theme      print the resolved theme palette and exit\n");
+                "  --sidebar         start with the sidebar open\n"
+                "  --no-sidebar      start with the sidebar closed\n"
+                "  --preview         start with the preview pane open\n"
+                "  --no-preview      start with the preview pane closed\n"
+                "  --dump-theme      print the resolved theme palette and exit\n"
+                "\nWithout a flag, omafile reopens with whatever was showing last time.\n"
+                "Set sidebar/preview in ~/.config/omafile/config.toml to pin them.\n");
 }
 
 // Works out where to start, in the order §13 specifies: --select's parent, an explicit
@@ -96,11 +103,28 @@ int main(int argc, char *argv[])
     QQuickStyle::setStyle(QStringLiteral("Material"));
 
     Theme theme;
+    Settings settings;
     DirectoryModel model;
     Operations operations;
     SearchModel search;
     Places places;
     Preview preview;
+
+    // Resolved before the window is built, so it opens in the right shape rather than
+    // opening one way and then rearranging itself.
+    QString sidebarOverride;
+    QString previewOverride;
+    for (const QString &argument : app.arguments()) {
+        if (argument == QLatin1String("--sidebar"))
+            sidebarOverride = QStringLiteral("on");
+        else if (argument == QLatin1String("--no-sidebar"))
+            sidebarOverride = QStringLiteral("off");
+        else if (argument == QLatin1String("--preview"))
+            previewOverride = QStringLiteral("on");
+        else if (argument == QLatin1String("--no-preview"))
+            previewOverride = QStringLiteral("off");
+    }
+    settings.applyOverrides(sidebarOverride, previewOverride);
 
     QQmlApplicationEngine engine;
     qmlRegisterSingletonInstance("Omafile", 1, 0, "Theme", &theme);
@@ -109,6 +133,7 @@ int main(int argc, char *argv[])
     qmlRegisterSingletonInstance("Omafile", 1, 0, "Find", &search);
     qmlRegisterSingletonInstance("Omafile", 1, 0, "Places", &places);
     qmlRegisterSingletonInstance("Omafile", 1, 0, "Preview", &preview);
+    qmlRegisterSingletonInstance("Omafile", 1, 0, "Settings", &settings);
     engine.addImageProvider(QStringLiteral("preview"), new PreviewImageProvider(&preview));
     // Registered only so QML can name the sort enum; the instance above is the model.
     qmlRegisterUncreatableType<DirectoryModel>("Omafile", 1, 0, "DirectoryModel",

@@ -136,6 +136,24 @@ created during the initial listing would be missed by inotify forever.
 it to "parent directory" unconditionally. With bare letters typing into the filter,
 correcting a typo would otherwise throw you into the parent.
 
+### Remembered UI state
+
+**The window reopens the way you left it** — sidebar and preview pane. Two files, because
+they answer different questions and only one is ours to write:
+
+    $XDG_CONFIG_HOME/omafile/config.toml   yours:  "always start with the sidebar open"
+    $XDG_STATE_HOME/omafile/state.toml     ours:   "the sidebar was open last time"
+
+Precedence, strongest first: **a command-line flag, then config.toml, then the remembered
+state, then off.** So remembering is a convenience that never overrides an explicit
+instruction, and `--no-sidebar` behaves the same whatever the last session did. A run
+started with an override does *not* write its overridden values back, or a single
+`--no-preview` would silently reset the preference.
+
+`config.toml` accepts `on` / `off` / `remember`; `remember` is how to ask for the default
+behaviour back explicitly. omafile never writes to that file — §1 rules out a settings UI,
+and a file the app rewrites is a settings UI with extra steps.
+
 ### Polish (M5)
 
 **Bulk rename plans before it touches anything.** `BulkRename::plan` is pure, so the
@@ -514,6 +532,10 @@ really §16.7's open question; the machinery is ready either way.
 
 **Open-with has not been driven by hand.** The parsing is tested, but the chooser overlay
 has never been opened against a real MIME type.
+
+**A directory shows a blank preview pane**, because directories have no preview. It reads
+as a bug at a glance — it briefly fooled me into thinking persistence was broken — and
+probably wants an item count or a dash rather than nothing.
 
 **Startup has crept: 86 ms at M0, 109 ms now.** Still inside the 120 ms budget, but the
 margin is thinner than it was, and the measurement is very sensitive to what else is

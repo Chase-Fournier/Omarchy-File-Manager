@@ -7,6 +7,7 @@
 #include "tst_polish.h"
 #include "tst_remote.h"
 #include "tst_search.h"
+#include "tst_settings.h"
 #include "tst_theme.h"
 
 #include <QCoreApplication>
@@ -68,6 +69,7 @@ int main(int argc, char *argv[])
     run(new TestFuzzyScorer);
     run(new TestBulkRename);
     run(new TestLocation);
+    run(new TestSettings);
     run(new TestTheme);
     run(new TestDirectoryModel);
     run(new TestFileOps);

@@ -33,6 +33,7 @@ SOURCES += \
     src/searchengine.cpp \
     src/searchmodel.cpp \
     src/operations.cpp \
+    src/settings.cpp \
     src/theme.cpp \
     src/thumbnails.cpp \
     src/trash.cpp \
@@ -59,6 +60,7 @@ HEADERS += \
     src/searchengine.h \
     src/searchmodel.h \
     src/operations.h \
+    src/settings.h \
     src/theme.h \
     src/thumbnails.h \
     src/trash.h \

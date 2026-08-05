@@ -63,7 +63,7 @@ Window {
     function extendSelection(delta) { Dir.extendSelection(delta) }
     function openTerminal() { Ops.openTerminal(Dir.path) }
     function showHelp() { help.open() }
-    function togglePreview() { Preview.enabled = !Preview.enabled }
+    function togglePreview() { Settings.preview = !Settings.preview }
 
     // Ctrl+Enter: pick the application rather than accepting xdg-open's default (§5).
     function openWith() {
@@ -93,9 +93,10 @@ Window {
     function bulkRename() { Ops.bulkRename(Dir.path, Dir.actionNames()) }
 
     // ── Places and remote (§10) ──────────────────────────────────────
-    property bool sidebarVisible: false
+    // Both remembered across sessions; see Settings for the precedence rules.
+    readonly property bool sidebarVisible: Settings.sidebar
 
-    function toggleSidebar() { sidebarVisible = !sidebarVisible }
+    function toggleSidebar() { Settings.sidebar = !Settings.sidebar }
 
     function bookmarkHere() {
         if (Places.isBookmarked(Dir.path))
@@ -449,6 +450,12 @@ Window {
                 font.pixelSize: root.fontSize
             }
         }
+    }
+
+    Binding {
+        target: Preview
+        property: "enabled"
+        value: Settings.preview
     }
 
     Shortcuts {

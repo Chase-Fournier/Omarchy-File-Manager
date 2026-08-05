@@ -23,6 +23,7 @@ SOURCES += \
     tst_polish.cpp \
     tst_remote.cpp \
     tst_search.cpp \
+    tst_settings.cpp \
     tst_theme.cpp \
     ../src/bulkrename.cpp \
     ../src/directorymodel.cpp \
@@ -40,6 +41,7 @@ SOURCES += \
     ../src/opener.cpp \
     ../src/searchengine.cpp \
     ../src/operations.cpp \
+    ../src/settings.cpp \
     ../src/theme.cpp \
     ../src/trash.cpp \
     ../src/watcher.cpp
@@ -54,6 +56,7 @@ HEADERS += \
     tst_polish.h \
     tst_remote.h \
     tst_search.h \
+    tst_settings.h \
     tst_theme.h \
     ../src/bulkrename.h \
     ../src/directorymodel.h \
@@ -72,6 +75,7 @@ HEADERS += \
     ../src/opener.h \
     ../src/searchengine.h \
     ../src/operations.h \
+    ../src/settings.h \
     ../src/theme.h \
     ../src/trash.h \
     ../src/watcher.h
