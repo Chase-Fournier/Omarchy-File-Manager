@@ -1,6 +1,6 @@
 # OmaFile
 
-**Open a folder in a blink, find anything by typing, act on it without touching the mouse — and drag it out when you want to.**
+**Simple, Fast, and Productive File Manager**
 
 A dead-simple file manager for Omarchy
 
