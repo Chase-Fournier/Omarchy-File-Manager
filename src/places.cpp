@@ -3,6 +3,7 @@
 #include "hosts.h"
 #include "location.h"
 #include "mounts.h"
+#include "terminal.h"
 
 #include <QTimer>
 
@@ -708,29 +709,11 @@ void Places::connectInTerminal(const QString &hostAlias)
                        "compression=no,idmap=user")
             .arg(hostAlias, target);
 
-    QString terminal = QString::fromLocal8Bit(qgetenv("TERMINAL"));
-    if (terminal.isEmpty() || QStandardPaths::findExecutable(terminal).isEmpty()) {
-        for (const QString &fallback : { QStringLiteral("alacritty"), QStringLiteral("ghostty"),
-                                         QStringLiteral("kitty"), QStringLiteral("foot"),
-                                         QStringLiteral("xterm") }) {
-            if (!QStandardPaths::findExecutable(fallback).isEmpty()) {
-                terminal = fallback;
-                break;
-            }
-        }
-    }
-    if (terminal.isEmpty()) {
+    // Held open on failure so the error is readable rather than flashing past.
+    if (!Terminal::runHeld(command)) {
         emit status(QStringLiteral("no terminal found"));
         return;
     }
-
-    QProcess process;
-    process.setProgram(terminal);
-    // Keep the window up on failure so the error is readable rather than flashing past.
-    process.setArguments({ QStringLiteral("-e"), QStringLiteral("sh"), QStringLiteral("-c"),
-                           command + QStringLiteral("; echo; echo '[press enter to close]'; "
-                                                    "read _") });
-    process.startDetached();
 
     emit status(QStringLiteral("connecting to %1 in a terminal…").arg(hostAlias));
 

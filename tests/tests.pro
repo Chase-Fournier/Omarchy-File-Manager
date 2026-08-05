@@ -41,6 +41,7 @@ SOURCES += \
     ../src/opener.cpp \
     ../src/searchengine.cpp \
     ../src/operations.cpp \
+    ../src/terminal.cpp \
     ../src/settings.cpp \
     ../src/theme.cpp \
     ../src/trash.cpp \

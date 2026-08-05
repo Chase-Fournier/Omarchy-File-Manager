@@ -190,6 +190,26 @@ a stray right-click cost something. Verified with real clicks in both directions
   once the real size arrives. This is the same layout-timing class of bug as the drag badge
   and the Overlay focus grab — the third instance in this project.
 
+### CI
+
+**The suite does not run as root, and the reason is a real test.** Every GitHub run since
+the workflow landed failed on one assertion — `reportsPermissionDenied`, which chmods a
+directory to 000 and expects the listing to fail. The container runs as root, and **root
+is exempt from the permission bits**, so the listing succeeded and the test was right to
+complain. Everything else passed, which is why the failure looked mysterious: eleven
+suites green and exit code 1.
+
+Fixed from both ends. The workflow creates the `builder` user before the test step rather
+than just before packaging, so the assertion is actually exercised; and the test skips
+itself under `geteuid() == 0`, so running the suite as root anywhere reports honestly
+instead of failing on behaviour that cannot occur. Verified by reproducing the job in the
+same `archlinux:latest` container both ways: as root it skips and exits 0, as `builder` it
+runs and passes.
+
+**Reproduce the job locally with docker** rather than guessing at CI: mount the repo
+read-only, copy it inside, and run the workflow's steps. Mounting it writable would leave
+root-owned build artefacts in the working tree.
+
 ### Theme (M0)
 
 **Quattro theme format — resolves open decision §16.1.** Quattro (v4.0.0.alpha) deleted the

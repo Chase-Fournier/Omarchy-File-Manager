@@ -115,7 +115,6 @@ Result score(const QString &needle, const QString &haystack)
     // Score the tightened window, greedily taking each needle character at its earliest
     // position within it — good enough in practice and O(n), which the §12 budget needs.
     int total = 0;
-    int consecutive = 0;
     int previousMatch = -1;
     int n = 0;
 
@@ -125,12 +124,10 @@ Result score(const QString &needle, const QString &haystack)
 
         int bonus = bonusAt(haystack, h);
         if (previousMatch >= 0 && h == previousMatch + 1) {
-            ++consecutive;
             // A run keeps the strongest bonus it started with rather than decaying to
             // zero mid-word, so "file" in "myfile" still reads as one unit.
             bonus = qMax(bonus, kBonusConsecutive);
         } else {
-            consecutive = 0;
             if (previousMatch >= 0) {
                 const int gap = h - previousMatch - 1;
                 total += kPenaltyGapStart + kPenaltyGapExtension * (gap - 1);

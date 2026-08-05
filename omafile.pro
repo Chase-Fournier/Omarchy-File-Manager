@@ -34,6 +34,7 @@ SOURCES += \
     src/searchmodel.cpp \
     src/operations.cpp \
     src/settings.cpp \
+    src/terminal.cpp \
     src/theme.cpp \
     src/thumbnails.cpp \
     src/trash.cpp \
@@ -61,6 +62,7 @@ HEADERS += \
     src/searchmodel.h \
     src/operations.h \
     src/settings.h \
+    src/terminal.h \
     src/theme.h \
     src/thumbnails.h \
     src/trash.h \

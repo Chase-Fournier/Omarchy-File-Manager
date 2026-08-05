@@ -5,6 +5,7 @@
 #include "handlers.h"
 #include "mounts.h"
 #include "opener.h"
+#include "terminal.h"
 
 #include <QClipboard>
 #include <QDir>
@@ -12,16 +13,106 @@
 #include <QFileInfo>
 #include <QGuiApplication>
 #include <QProcess>
+#include <QSet>
 #include <QStandardPaths>
 #include <QTemporaryFile>
 #include <QUrl>
 
 #include <sys/stat.h>
 
-// Defined below, next to openTerminal; both bulk rename and terminal-here need it.
-static QString findTerminal();
-
 namespace {
+
+// ── Launching an editor ───────────────────────────────────────────────────────
+//
+// Two things here are not interchangeable and were being treated as though they were.
+//
+// A *terminal editor* is handed to a terminal, which stays open for as long as the editor
+// runs. A *graphical editor* must be launched directly: given to a terminal it hands the
+// file to an already-running instance and returns within a fifth of a second, so the
+// window opens and closes again before you can read it. That is the whole bug — with
+// $EDITOR=code, "edit ~/.ssh/config", "edit omafile config" and bulk rename all flashed.
+//
+// And a terminal is not always told the same way. The spec launchers take the command
+// directly; the emulators want -e. Passing -e to xdg-terminal-exec opened nothing at all.
+
+// $EDITOR may carry arguments ("code --wait", "nvim -u NONE"), so it is a command line,
+// not a program name. $VISUAL wins where both are set, which is the usual convention.
+QStringList editorCommand()
+{
+    QString editor = QString::fromLocal8Bit(qgetenv("VISUAL"));
+    if (editor.isEmpty())
+        editor = QString::fromLocal8Bit(qgetenv("EDITOR"));
+    return QProcess::splitCommand(editor);
+}
+
+bool isGraphicalEditor(const QString &program)
+{
+    static const QSet<QString> graphical = {
+        QStringLiteral("code"),   QStringLiteral("code-insiders"),
+        QStringLiteral("codium"), QStringLiteral("vscodium"),
+        QStringLiteral("cursor"), QStringLiteral("windsurf"),
+        QStringLiteral("subl"),   QStringLiteral("sublime_text"),
+        QStringLiteral("zed"),    QStringLiteral("zeditor"),
+        QStringLiteral("kate"),   QStringLiteral("kwrite"),
+        QStringLiteral("gedit"),  QStringLiteral("gnome-text-editor"),
+        QStringLiteral("geany"),  QStringLiteral("mousepad"),
+        QStringLiteral("xed"),    QStringLiteral("pluma"),
+        QStringLiteral("notepadqq"), QStringLiteral("atom"),
+        QStringLiteral("gvim"),   QStringLiteral("nvim-qt"),
+    };
+    return graphical.contains(program);
+}
+
+// What makes a graphical editor stay in the foreground until the file is closed. Bulk
+// rename is meaningless without it: the edit would be "finished" before it began. Empty
+// means there is no way to ask, which is a refusal rather than something to paper over.
+QStringList blockingArgsFor(const QString &program)
+{
+    static const QSet<QString> waits = {
+        QStringLiteral("code"),   QStringLiteral("code-insiders"),
+        QStringLiteral("codium"), QStringLiteral("vscodium"),
+        QStringLiteral("cursor"), QStringLiteral("windsurf"),
+        QStringLiteral("subl"),   QStringLiteral("sublime_text"),
+        QStringLiteral("zed"),    QStringLiteral("zeditor"),
+    };
+    if (waits.contains(program))
+        return { QStringLiteral("--wait") };
+    if (program == QLatin1String("kate") || program == QLatin1String("kwrite"))
+        return { QStringLiteral("--block") };
+    if (program == QLatin1String("gvim"))
+        return { QStringLiteral("-f") };
+    if (program == QLatin1String("nvim-qt"))
+        return { QStringLiteral("--nofork") };
+    return {};
+}
+
+// Opening at a line, which every editor spells differently.
+QStringList lineArgsFor(const QString &program, const QString &path, int line)
+{
+    if (line <= 0)
+        return { path };
+
+    static const QSet<QString> gotoFlag = {
+        QStringLiteral("code"),   QStringLiteral("code-insiders"),
+        QStringLiteral("codium"), QStringLiteral("vscodium"),
+        QStringLiteral("cursor"), QStringLiteral("windsurf"),
+    };
+    // subl, zed and helix all take the line as a suffix on the path instead.
+    static const QSet<QString> suffix = {
+        QStringLiteral("subl"), QStringLiteral("sublime_text"),
+        QStringLiteral("zed"),  QStringLiteral("zeditor"),
+        QStringLiteral("hx"),   QStringLiteral("helix"),
+    };
+
+    if (gotoFlag.contains(program))
+        return { QStringLiteral("--goto"), QStringLiteral("%1:%2").arg(path).arg(line) };
+    if (suffix.contains(program))
+        return { QStringLiteral("%1:%2").arg(path).arg(line) };
+    if (program == QLatin1String("kate") || program == QLatin1String("kwrite"))
+        return { QStringLiteral("-l"), QString::number(line), path };
+    // vi, vim, nvim, nano, emacs, micro and kakoune all understand +N.
+    return { QStringLiteral("+%1").arg(line), path };
+}
 
 dev_t deviceOf(const QString &path)
 {
@@ -220,21 +311,8 @@ void Operations::newFile(const QString &parentDir, const QString &name)
 
 void Operations::runInTerminal(const QString &command, const QString &workingDir)
 {
-    const QString terminal = findTerminal();
-    if (terminal.isEmpty()) {
+    if (!Terminal::runHeld(command, workingDir))
         setStatus(QStringLiteral("no terminal found"));
-        return;
-    }
-
-    QProcess process;
-    process.setProgram(terminal);
-    // Held open afterwards so anything the command printed can actually be read.
-    process.setArguments({ QStringLiteral("-e"), QStringLiteral("sh"), QStringLiteral("-c"),
-                           command + QStringLiteral("; echo; echo '[press enter to close]'; "
-                                                    "read _") });
-    if (!workingDir.isEmpty())
-        process.setWorkingDirectory(workingDir);
-    process.startDetached();
 }
 
 void Operations::rename(const QString &path, const QString &newName)
@@ -259,11 +337,32 @@ void Operations::bulkRename(const QString &directory, const QStringList &names)
         return;
     }
 
-    const QString editor = QString::fromLocal8Bit(qgetenv("EDITOR"));
-    const QString terminal = findTerminal();
-    if (editor.isEmpty() || terminal.isEmpty()) {
+    const QStringList editor = editorCommand();
+    if (editor.isEmpty()) {
         setStatus(QStringLiteral("set $EDITOR to use bulk rename"));
         return;
+    }
+
+    // Everything here waits on the editor exiting, so an editor that cannot be asked to
+    // wait has to be refused up front rather than "succeeding" with an unedited file.
+    const QString program = editor.first();
+    const bool graphical = isGraphicalEditor(program);
+    QStringList blocking;
+    QString terminal;
+
+    if (graphical) {
+        blocking = blockingArgsFor(program);
+        if (blocking.isEmpty()) {
+            setStatus(QStringLiteral("%1 cannot be asked to wait — set $EDITOR to a "
+                                     "terminal editor for bulk rename").arg(program));
+            return;
+        }
+    } else {
+        terminal = Terminal::find();
+        if (terminal.isEmpty()) {
+            setStatus(QStringLiteral("no terminal found"));
+            return;
+        }
     }
 
     // A real file rather than a pipe: $EDITOR needs something to open, and keeping it
@@ -285,8 +384,13 @@ void Operations::bulkRename(const QString &directory, const QStringList &names)
     m_renameOriginals = names;
 
     auto *process = new QProcess(this);
-    process->setProgram(terminal);
-    process->setArguments({ QStringLiteral("-e"), editor, m_renameFile });
+    if (graphical) {
+        process->setProgram(program);
+        process->setArguments(editor.mid(1) + blocking + QStringList{ m_renameFile });
+    } else {
+        process->setProgram(terminal);
+        process->setArguments(Terminal::argsFor(terminal, editor + QStringList{ m_renameFile }));
+    }
     connect(process, &QProcess::finished, this,
             [this, process](int, QProcess::ExitStatus) {
                 process->deleteLater();
@@ -401,22 +505,6 @@ void Operations::cancel()
     }
 }
 
-// $TERMINAL if it is set and real, otherwise the first of the usual suspects present.
-static QString findTerminal()
-{
-    QString terminal = QString::fromLocal8Bit(qgetenv("TERMINAL"));
-    if (!terminal.isEmpty() && !QStandardPaths::findExecutable(terminal).isEmpty())
-        return terminal;
-
-    for (const QString &fallback : { QStringLiteral("alacritty"), QStringLiteral("ghostty"),
-                                     QStringLiteral("kitty"), QStringLiteral("foot"),
-                                     QStringLiteral("xterm") }) {
-        if (!QStandardPaths::findExecutable(fallback).isEmpty())
-            return fallback;
-    }
-    return QString();
-}
-
 void Operations::reportStatus(const QString &message)
 {
     if (!message.isEmpty())
@@ -430,33 +518,8 @@ void Operations::openInNewWindow(const QString &location)
 
 void Operations::openTerminal(const QString &directory)
 {
-    // Omarchy's own launcher first, so omafile opens whatever the desktop is configured
-    // to use rather than second-guessing it.
-    static const QStringList candidates = {
-        QStringLiteral("omarchy-launch-terminal"),
-        QStringLiteral("xdg-terminal-exec"),
-    };
-
-    for (const QString &candidate : candidates) {
-        if (!QStandardPaths::findExecutable(candidate).isEmpty()) {
-            QProcess process;
-            process.setWorkingDirectory(directory);
-            process.setProgram(candidate);
-            process.startDetached();
-            return;
-        }
-    }
-
-    const QString terminal = findTerminal();
-    if (terminal.isEmpty()) {
+    if (!Terminal::openAt(directory))
         setStatus(QStringLiteral("no terminal found"));
-        return;
-    }
-
-    QProcess process;
-    process.setWorkingDirectory(directory);
-    process.setProgram(terminal);
-    process.startDetached();
 }
 
 QVariantList Operations::handlersFor(const QString &path) const
@@ -481,19 +544,34 @@ void Operations::openWith(const QString &desktopFile, const QString &path)
 
 void Operations::openAtLine(const QString &path, int line)
 {
-    const QString editor = QString::fromLocal8Bit(qgetenv("EDITOR"));
-    const QString terminal = findTerminal();
-    if (line <= 0 || editor.isEmpty() || terminal.isEmpty()) {
+    const QStringList editor = editorCommand();
+    if (editor.isEmpty()) {
+        Opener::open(path); // no $EDITOR: whatever the desktop opens text with will do
+        return;
+    }
+
+    const QString program = editor.first();
+    const QStringList args = editor.mid(1) + lineArgsFor(program, path, line);
+    const QString workingDir = QFileInfo(path).absolutePath();
+
+    // A graphical editor is launched directly. Handing it to a terminal gives a window
+    // that opens and closes again immediately, because it returns as soon as it has
+    // passed the file to the instance already running.
+    if (isGraphicalEditor(program)) {
+        QProcess::startDetached(program, args, workingDir);
+        return;
+    }
+
+    const QString terminal = Terminal::find();
+    if (terminal.isEmpty()) {
         Opener::open(path);
         return;
     }
 
-    // "+N" is understood by vi, vim, nvim, helix and emacs alike.
     QProcess process;
     process.setProgram(terminal);
-    process.setArguments({ QStringLiteral("-e"), editor,
-                           QStringLiteral("+%1").arg(line), path });
-    process.setWorkingDirectory(QFileInfo(path).absolutePath());
+    process.setArguments(Terminal::argsFor(terminal, QStringList{ program } + args));
+    process.setWorkingDirectory(workingDir);
     process.startDetached();
 }
 

@@ -259,6 +259,13 @@ void TestDirectoryModel::reportsBrokenSymlinks()
 
 void TestDirectoryModel::reportsPermissionDenied()
 {
+    // Root is exempt from the permission bits, so there is nothing here to be denied and
+    // the listing succeeds. Skipping says that plainly rather than failing on a machine
+    // where the behaviour under test cannot occur — CI hit this by running its container
+    // as root, and the fix there is to run the suite as somebody else.
+    if (::geteuid() == 0)
+        QSKIP("running as root: permission bits do not apply");
+
     const QString locked = m_dir.path() + QStringLiteral("/locked");
     QVERIFY(QDir().mkpath(locked));
     QVERIFY(QFile::setPermissions(locked, QFileDevice::WriteOwner));
