@@ -4,6 +4,7 @@
 #include "tst_formatting.h"
 #include "tst_fuzzyscorer.h"
 #include "tst_location.h"
+#include "tst_places.h"
 #include "tst_polish.h"
 #include "tst_remote.h"
 #include "tst_search.h"
@@ -77,6 +78,7 @@ int main(int argc, char *argv[])
     run(new TestFileOps);
     run(new TestSearch);
     run(new TestRemote);
+    run(new TestPlaces);
     run(new TestPolish);
 
     if (ran == 0) {

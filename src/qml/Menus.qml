@@ -36,6 +36,9 @@ QtObject {
             { label: "Paste", enabled: isDir && Ops.canPaste,
               action: () => Ops.paste(Dir.rowPath(index)) },
             { label: "Copy path", action: () => app.copyPath() },
+            { label: Places.isBookmarked(Dir.rowPath(index)) ? "Unpin from sidebar"
+                                                            : "Pin to sidebar",
+              action: () => app.pinSelection() },
             { separator: true },
             { label: "Rename", action: () => app.beginRename() },
             { label: "Bulk rename in $EDITOR", action: () => app.bulkRename() },
@@ -85,7 +88,7 @@ QtObject {
             entries.push({ label: "Run rclone config",
                            action: () => Ops.runInTerminal("rclone config") })
         } else if (kind === 1) {
-            entries.push({ label: "Remove bookmark",
+            entries.push({ label: "Unpin from sidebar",
                            action: () => Places.removeBookmark(target) })
         }
 

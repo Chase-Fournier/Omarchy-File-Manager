@@ -200,6 +200,35 @@ a stray right-click cost something. Verified with real clicks in both directions
   once the real size arrives. This is the same layout-timing class of bug as the drag badge
   and the Overlay focus grab — the third instance in this project.
 
+### Pinning files as well as folders
+
+**A pin is a bookmark that also accepts a file**, which is most of why this needed any work
+at all: `addBookmark` already stored whatever path it was handed, but everything downstream
+assumed a directory. A pinned file was drawn with the folder glyph and, when clicked,
+asked the model to *navigate into a file* — so the feature was one line from existing and
+would have looked broken the first time anyone used it.
+
+**A pinned file opens; a pinned folder navigates.** That is the same answer Enter gives
+each of them in the list, so a pin behaves like the row it was made from rather than
+inventing a third rule. `Places::activate` routes on `QFileInfo::isDir`, not on the stored
+kind, because the target can change type between sessions.
+
+**Ctrl+D cannot pin a file** — it means "the folder I am looking at", and there is no
+sensible way to make one key mean both that and "the row under the cursor". So the row is
+pinned from the context menu, and `pinSelection` goes through `Dir.actionPaths()` like
+every other verb, which gets multi-select for free. A mixed selection follows whichever way
+the first path goes, so the entry's label is never a lie about what it will do.
+
+**One vocabulary: "pin".** It was "Bookmark here" on Ctrl+D and "Remove bookmark" in the
+sidebar menu, and "bookmark a file" reads oddly. The stored file is still
+`~/.config/omafile/bookmarks` — renaming it would break everyone's pins for a word.
+
+**`tst_places` is the first test to construct a `Places`.** It fakes `HOME`,
+`XDG_CONFIG_HOME` *and* `XDG_RUNTIME_DIR` — the first two for the obvious reasons, the
+third because the constructor sweeps orphaned mounts and must not go anywhere near a mount
+this machine is really holding. The glyph assertion was confirmed to fail when both pins
+are drawn the same way.
+
 ### The QML layer has tests now
 
 **`tests/qml/` is a second binary, `tst_omafile_qml`.** It has to be: QtQuickTest needs a

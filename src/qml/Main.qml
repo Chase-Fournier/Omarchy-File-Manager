@@ -154,11 +154,29 @@ Window {
 
     function toggleSidebar() { Settings.sidebar = !Settings.sidebar }
 
-    function bookmarkHere() {
+    // Ctrl+D pins the directory you are looking at.
+    function pinHere() {
         if (Places.isBookmarked(Dir.path))
             Places.removeBookmark(Dir.path)
         else
             Places.addBookmark(Dir.path)
+    }
+
+    // The row (or rows) under the cursor, which is how a *file* gets pinned — Ctrl+D can
+    // only ever mean the current directory. A mixed selection follows whichever way the
+    // first one goes, so the entry's label is never a lie about what it will do.
+    function pinSelection() {
+        const paths = Dir.actionPaths()
+        if (paths.length === 0)
+            return
+
+        const pinning = !Places.isBookmarked(paths[0])
+        for (const path of paths) {
+            if (pinning)
+                Places.addBookmark(path)
+            else
+                Places.removeBookmark(path)
+        }
     }
 
     function promptConnect() {

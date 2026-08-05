@@ -20,6 +20,7 @@ SOURCES += \
     tst_formatting.cpp \
     tst_fuzzyscorer.cpp \
     tst_location.cpp \
+    tst_places.cpp \
     tst_polish.cpp \
     tst_remote.cpp \
     tst_search.cpp \
@@ -40,6 +41,7 @@ SOURCES += \
     ../src/location.cpp \
     ../src/clipboard.cpp \
     ../src/opener.cpp \
+    ../src/places.cpp \
     ../src/searchengine.cpp \
     ../src/operations.cpp \
     ../src/terminal.cpp \
@@ -55,6 +57,7 @@ HEADERS += \
     tst_formatting.h \
     tst_fuzzyscorer.h \
     tst_location.h \
+    tst_places.h \
     tst_polish.h \
     tst_remote.h \
     tst_search.h \
@@ -76,6 +79,7 @@ HEADERS += \
     ../src/location.h \
     ../src/clipboard.h \
     ../src/opener.h \
+    ../src/places.h \
     ../src/searchengine.h \
     ../src/operations.h \
     ../src/settings.h \

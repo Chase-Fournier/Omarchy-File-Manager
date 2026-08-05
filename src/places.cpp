@@ -3,6 +3,7 @@
 #include "hosts.h"
 #include "location.h"
 #include "mounts.h"
+#include "opener.h"
 #include "terminal.h"
 
 #include <QTimer>
@@ -170,15 +171,21 @@ void Places::rebuild()
     folder(QStandardPaths::DocumentsLocation, QStringLiteral("\uF15C"));
     folder(QStandardPaths::PicturesLocation, QStringLiteral("\uF03E"));
 
+    // Pins. A file can be pinned as well as a folder, and the two behave differently when
+    // clicked, so they are drawn differently: a pinned file carries the same generic file
+    // glyph the list uses, and says what it will do before you click it.
     for (const QString &path : std::as_const(m_bookmarks)) {
+        const QFileInfo info(path);
+
         Place place;
         place.kind = Place::Bookmark;
-        place.name = QFileInfo(path).fileName();
+        place.name = info.fileName();
         if (place.name.isEmpty())
             place.name = path;
-        place.glyph = QStringLiteral("\uF02E");
+        place.glyph = info.isDir() ? QStringLiteral("\uF02E")   // pin
+                                   : QStringLiteral("\uF15B");  // generic file
         place.target = path;
-        place.available = QFileInfo::exists(path);
+        place.available = info.exists();
         if (!place.available)
             place.note = QStringLiteral("missing");
         m_places.append(place);
@@ -624,6 +631,14 @@ void Places::activate(int row)
         return;
     }
 
+    // A pinned file opens, because navigating to a file is not a thing you can do. This
+    // is the same answer Enter gives it in the list, so a pin behaves like the row it
+    // was made from.
+    if (place.kind == Place::Bookmark && !QFileInfo(place.target).isDir()) {
+        Opener::open(place.target);
+        return;
+    }
+
     if (place.kind == Place::Folder || place.kind == Place::Bookmark
         || place.kind == Place::Volume) {
         emit navigate(place.target);
@@ -784,7 +799,7 @@ void Places::addBookmark(const QString &path)
         file.write(m_bookmarks.join(QLatin1Char('\n')).toUtf8() + '\n');
 
     refresh();
-    emit status(QStringLiteral("Bookmarked %1").arg(QFileInfo(path).fileName()));
+    emit status(QStringLiteral("Pinned %1").arg(QFileInfo(path).fileName()));
 }
 
 bool Places::isBookmarked(const QString &path) const
@@ -802,6 +817,9 @@ void Places::removeBookmark(const QString &path)
         file.write(m_bookmarks.join(QLatin1Char('\n')).toUtf8() + '\n');
 
     refresh();
+    // Said out loud, like pinning is: unpinning from a row menu otherwise gives no sign
+    // it happened at all when the sidebar is closed.
+    emit status(QStringLiteral("Unpinned %1").arg(QFileInfo(path).fileName()));
 }
 
 void Places::connectTo(const QString &input)

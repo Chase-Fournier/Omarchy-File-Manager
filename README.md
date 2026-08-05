@@ -82,7 +82,7 @@ selected" is to start typing its name. Everything else is modified or an arrow k
 | `Ctrl+Shift+N` | New folder |
 | `Ctrl+T` | Terminal here |
 | `Ctrl+N` | New window |
-| `Ctrl+D` | Bookmark here |
+| `Ctrl+D` | Pin this folder to the sidebar |
 | `Ctrl+S` | Connect to… |
 | `Ctrl+E` | Eject / unmount |
 | `Ctrl+1` `Ctrl+2` `Ctrl+3` | Sort by name / size / time (again to reverse) |
@@ -104,6 +104,13 @@ natural key. A sidebar entry offers the file that governs it: `~/.ssh/config` fo
 
 Clicking away closes the menu **and** does whatever that click would have done — a stray
 right-click costs nothing.
+
+**Pin** anything you keep coming back to. `Ctrl+D` pins the folder you are in; right-click
+a row and choose *Pin to sidebar* for anything else, including a single file — that is the
+only way to pin a file, since `Ctrl+D` can only ever mean the current directory. Pinned
+folders open in place; a pinned file opens in whatever application owns it, the same as
+pressing Enter on it. Right-click a pin to remove it. They live one path per line in
+`~/.config/omafile/bookmarks`.
 
 **Drag** a file onto a folder to move it there, out to another application, or in from one.
 Hold over a folder for a moment and it opens, so you can drag into a tree you cannot see;
