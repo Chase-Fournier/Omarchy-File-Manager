@@ -23,6 +23,7 @@ private slots:
     void handlesAwkwardFilenames();
     void reportsBrokenSymlinks();
     void reportsPermissionDenied();
+    void breadcrumbSegmentsNameTheirDirectories();
     void navigationSelectsTheDirectoryJustLeft();
     void remembersWhereTheCursorWasInEachDirectory();
     void cursorMemoryYieldsToAnExplicitSelection();

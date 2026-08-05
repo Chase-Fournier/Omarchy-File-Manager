@@ -282,6 +282,41 @@ void TestDirectoryModel::reportsPermissionDenied()
                                       | QFileDevice::ExeOwner);
 }
 
+// Dropping a file on a breadcrumb is how you move it to a directory above the one in
+// view, so a crumb has to name exactly the directory navigating to it would reach —
+// including the last one, which is where you already are.
+void TestDirectoryModel::breadcrumbSegmentsNameTheirDirectories()
+{
+    write(QStringLiteral("one/two/three/file"));
+
+    DirectoryModel model;
+    model.setLocation(Location::fromLocalPath(m_dir.path() + QStringLiteral("/one/two/three")));
+    QVERIFY(waitForIdle(&model));
+
+    const QStringList parts = model.segments();
+    QVERIFY(parts.size() >= 4);
+    QCOMPARE(parts.last(), QStringLiteral("three"));
+
+    // The last crumb is the current directory; each one before it is its parent.
+    QCOMPARE(model.segmentPath(parts.size() - 1),
+             m_dir.path() + QStringLiteral("/one/two/three"));
+    QCOMPARE(model.segmentPath(parts.size() - 2),
+             m_dir.path() + QStringLiteral("/one/two"));
+    QCOMPARE(model.segmentPath(parts.size() - 3),
+             m_dir.path() + QStringLiteral("/one"));
+
+    // And it agrees with actually navigating there, which is the invariant that matters:
+    // the drop and the click must not disagree about where a crumb points.
+    const QString expected = model.segmentPath(parts.size() - 2);
+    model.navigateToSegment(parts.size() - 2);
+    QVERIFY(waitForIdle(&model));
+    QCOMPARE(model.path(), expected);
+
+    // Out of range is empty rather than a wrong directory to drop files into.
+    QVERIFY(model.segmentPath(-1).isEmpty());
+    QVERIFY(model.segmentPath(parts.size()).isEmpty());
+}
+
 void TestDirectoryModel::navigationSelectsTheDirectoryJustLeft()
 {
     write(QStringLiteral("alpha/keep"));

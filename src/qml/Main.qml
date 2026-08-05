@@ -64,6 +64,40 @@ Window {
     function openTerminal() { Ops.openTerminal(Dir.path) }
     function showHelp() { help.open() }
 
+    // ── Drops ────────────────────────────────────────────────────────
+    // Shared by the list and the breadcrumb, so a drop onto an ancestor behaves exactly
+    // like a drop onto a folder in view.
+
+    function acceptDrop(drop, destination) {
+        if (!destination)
+            return
+
+        // Three ways in, because sources differ in what they actually publish: Qt-parsed
+        // urls, a raw uri-list Qt did not parse, or bare text. Falling through silently
+        // is how a drop "lights up" and then does nothing at all.
+        let uris = []
+        if (drop.hasUrls && drop.urls.length > 0) {
+            uris = drop.urls.map(u => u.toString())
+        } else if (drop.formats.indexOf("text/uri-list") >= 0) {
+            uris = drop.getDataAsString("text/uri-list")
+                       .split(/[\r\n]+/)
+                       .filter(line => line.length > 0 && line[0] !== "#")
+        } else if (drop.hasText) {
+            uris = drop.text.split(/[\r\n]+/).filter(line => line.length > 0)
+        }
+
+        // Ctrl forces copy, Shift forces move; otherwise move within a filesystem and
+        // copy across one (§7).
+        let action = 0
+        if (drop.keyboardModifiers & Qt.ControlModifier)
+            action = 1
+        else if (drop.keyboardModifiers & Qt.ShiftModifier)
+            action = 2
+
+        Ops.dropUris(uris, destination, action)
+        drop.acceptProposedAction()
+    }
+
     // ── Right-click menus ────────────────────────────────────────────
     // Every entry calls a verb that already exists for a shortcut, so the menu can never
     // do something the keyboard cannot.
@@ -735,6 +769,8 @@ Window {
                             }
 
                             Text {
+                                id: crumb
+
                                 text: modelData
                                 color: index === Dir.segments.length - 1 ? Theme.fgBright : Theme.dim
                                 font.family: root.monoFamily
@@ -744,6 +780,56 @@ Window {
                                     anchors.fill: parent
                                     cursorShape: Qt.PointingHandCursor
                                     onClicked: Dir.navigateToSegment(index)
+                                }
+
+                                // The way back out. Spring-loading takes you *into* a
+                                // folder mid-drag and there was nothing that took you
+                                // out again, nor any way to reach a directory above the
+                                // one in view — so the breadcrumb accepts a drag too:
+                                // hover to go there, drop to drop there.
+                                DropArea {
+                                    id: crumbDrop
+
+                                    // Wider than the text so a crumb is not a pixel-perfect
+                                    // target while something is held under the cursor —
+                                    // "~" is eight pixels of glyph. The horizontal reach
+                                    // covers the " / " between crumbs as well, so there
+                                    // is no dead gap to drop into by mistake.
+                                    anchors.fill: parent
+                                    anchors.leftMargin: -6
+                                    anchors.rightMargin: -6
+                                    anchors.topMargin: -4
+                                    anchors.bottomMargin: -4
+
+                                    onEntered: crumbSpring.restart()
+                                    onExited: crumbSpring.stop()
+                                    onDropped: function (drop) {
+                                        crumbSpring.stop()
+                                        root.acceptDrop(drop, Dir.segmentPath(index))
+                                    }
+
+                                    Timer {
+                                        id: crumbSpring
+
+                                        // Longer than the list's 300 ms: crumbs sit in a
+                                        // row, so several get crossed on the way to the
+                                        // one that was meant.
+                                        interval: 500
+                                        onTriggered: {
+                                            if (crumbDrop.containsDrag)
+                                                Dir.navigateToSegment(index)
+                                        }
+                                    }
+
+                                    Rectangle {
+                                        anchors.fill: parent
+                                        visible: crumbDrop.containsDrag
+                                        radius: 4
+                                        color: "transparent"
+                                        border.width: 1
+                                        border.color: Theme.accent
+                                        opacity: 0.8
+                                    }
                                 }
                             }
                         }
@@ -953,33 +1039,7 @@ Window {
 
                 onDropped: function (drop) {
                     springLoad.stop()
-
-                    // Three ways in, because sources differ in what they actually
-                    // publish: Qt-parsed urls, a raw uri-list Qt did not parse, or bare
-                    // text. Falling through silently is how a drop "lights up" and then
-                    // does nothing at all.
-                    let uris = []
-                    if (drop.hasUrls && drop.urls.length > 0) {
-                        uris = drop.urls.map(u => u.toString())
-                    } else if (drop.formats.indexOf("text/uri-list") >= 0) {
-                        uris = drop.getDataAsString("text/uri-list")
-                                   .split(/[\r\n]+/)
-                                   .filter(line => line.length > 0 && line[0] !== "#")
-                    } else if (drop.hasText) {
-                        uris = drop.text.split(/[\r\n]+/).filter(line => line.length > 0)
-                    }
-
-                    // Ctrl forces copy, Shift forces move; otherwise move within a
-                    // filesystem and copy across one (§7).
-                    let action = 0
-                    if (drop.keyboardModifiers & Qt.ControlModifier)
-                        action = 1
-                    else if (drop.keyboardModifiers & Qt.ShiftModifier)
-                        action = 2
-
-                    const destination = targetRow >= 0 ? Dir.rowPath(targetRow) : Dir.path
-                    Ops.dropUris(uris, destination, action)
-                    drop.acceptProposedAction()
+                    root.acceptDrop(drop, targetRow >= 0 ? Dir.rowPath(targetRow) : Dir.path)
                     targetRow = -1
                 }
 

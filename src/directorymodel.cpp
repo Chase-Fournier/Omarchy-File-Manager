@@ -708,6 +708,20 @@ void DirectoryModel::navigateToSegment(int segmentIndex)
     setLocation(target);
 }
 
+QString DirectoryModel::segmentPath(int segmentIndex) const
+{
+    const QStringList parts = segments();
+    if (segmentIndex < 0 || segmentIndex >= parts.size())
+        return QString();
+
+    // Walked up the same way navigateToSegment does, so the two can never disagree about
+    // which directory a crumb means.
+    Location target = m_location;
+    for (int i = parts.size() - 1; i > segmentIndex; --i)
+        target = target.parent();
+    return target.localPath();
+}
+
 void DirectoryModel::goParent()
 {
     if (m_location.isRoot())

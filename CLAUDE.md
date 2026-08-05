@@ -125,7 +125,7 @@ Three menus, all in `src/qml/ContextMenu.qml`: one for a row, one for blank spac
 a sidebar place — the blank-space menu also answers the strip beside the breadcrumb.
 Dismissing passes the click through to whatever it hit. All four surfaces are verified
 with real injected clicks, not just screenshots; `FileOps::makeFile` is covered by
-`tst_fileops::newFileNeverTruncates`. 205 tests pass.
+`tst_fileops::newFileNeverTruncates`. 206 tests pass.
 
 ---
 
@@ -189,6 +189,24 @@ a stray right-click cost something. Verified with real clicks in both directions
   height still reads as empty and the clamp does nothing. As a binding it corrects itself
   once the real size arrives. This is the same layout-timing class of bug as the drag badge
   and the Overlay focus grab — the third instance in this project.
+
+### Dragging to somewhere that is not on screen
+
+**The breadcrumb accepts drags.** Spring-loading already took you *into* a folder mid-drag,
+which was half a feature: there was nothing that took you back out again, and no way at all
+to reach a directory above the one in view. Hovering a crumb for 500 ms navigates there,
+and dropping on one drops there — so the way out is the same control that shows you where
+you are.
+
+The delay is longer than the list's 300 ms because crumbs sit in a row and several get
+crossed on the way to the one that was meant, where rows are approached one at a time.
+The targets are widened by 6 px horizontally: `~` is eight pixels of glyph, and the reach
+also covers the " / " separators so there is no dead gap between them.
+
+**`segmentPath` walks up exactly the way `navigateToSegment` does**, so a drop and a click
+can never disagree about which directory a crumb means — pinned by
+`breadcrumbSegmentsNameTheirDirectories`, which asserts the two against each other rather
+than against a string it built itself.
 
 ### Opening things (terminals and editors)
 

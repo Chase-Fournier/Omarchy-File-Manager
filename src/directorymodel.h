@@ -102,6 +102,8 @@ public:
     // Navigation. Everything the UI can do to change location goes through these.
     Q_INVOKABLE void navigate(const QString &input);
     Q_INVOKABLE void navigateToSegment(int segmentIndex);
+    // The path a breadcrumb segment names, so a drag can be dropped on an ancestor.
+    Q_INVOKABLE QString segmentPath(int segmentIndex) const;
     Q_INVOKABLE void goParent();
     Q_INVOKABLE void activate(int row);
     Q_INVOKABLE void activateInNewWindow(int row);
