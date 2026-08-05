@@ -28,6 +28,15 @@ bool runHeld(const QString &shellCommand, const QString &workingDir = QString())
 // Just a terminal, no command — "terminal here".
 bool openAt(const QString &directory);
 
+// One word, quoted so a shell reads it literally.
+//
+// Needed wherever a command is a *string* rather than an argument list: `sh -c`, and
+// anything handed to ssh, which always runs its command through the remote shell. A path
+// is attacker-controlled input in the same way a filename is — §14's newline-in-a-filename
+// case is this one wearing a different hat — and "wrap it in single quotes" is not
+// quoting, because the one character it fails on is the single quote.
+QString shellQuote(const QString &word);
+
 // ── Editors ──────────────────────────────────────────────────────────────────
 //
 // A terminal editor is handed to a terminal, which stays open for as long as it runs. A

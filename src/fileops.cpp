@@ -55,6 +55,28 @@ bool isSameFile(const QString &a, const QString &b)
     return first.st_dev == second.st_dev && first.st_ino == second.st_ino;
 }
 
+// Is `directory` the same as `source`, or somewhere inside it?
+//
+// Copying a directory into its own descendant walks a tree that it is simultaneously
+// growing: each level's children are listed *after* the level below has been created, so
+// the new copy shows up in the next listing and is copied again. It stops only at
+// PATH_MAX, roughly a thousand levels down, having rewritten every file in the source
+// several hundred times — enough to fill a disk with a folder of any size.
+//
+// The check is on canonical paths so a symlink or a `..` cannot be used to slip past it.
+// An empty canonical path means the entry does not exist, which is not this function's
+// problem to report: say no and let the copy fail on its own terms.
+bool destinationIsInsideSource(const QString &source, const QString &directory)
+{
+    const QString from = QFileInfo(source).canonicalFilePath();
+    const QString into = QFileInfo(directory).canonicalFilePath();
+    if (from.isEmpty() || into.isEmpty())
+        return false;
+
+    // The separator matters: without it, /home/a would swallow /home/abc.
+    return into == from || into.startsWith(from + QLatin1Char('/'));
+}
+
 } // namespace
 
 FileOps::FileOps(QObject *parent)
@@ -320,6 +342,16 @@ void FileOps::copy(const QStringList &sources, const QString &destinationDir, qu
 {
     beginOperation();
 
+    // Refused before anything is written, not part-way through: by the time the recursion
+    // is visible on disk there are already hundreds of gigabytes of it.
+    for (const QString &source : sources) {
+        if (destinationIsInsideSource(source, destinationDir)) {
+            emit failed(id, QStringLiteral("cannot copy %1 into itself")
+                                .arg(QFileInfo(source).fileName()));
+            return;
+        }
+    }
+
     for (const QString &source : sources)
         m_bytesTotal += treeSize(source);
 
@@ -355,6 +387,16 @@ void FileOps::copy(const QStringList &sources, const QString &destinationDir, qu
 void FileOps::move(const QStringList &sources, const QString &destinationDir, quint64 id)
 {
     beginOperation();
+
+    // rename(2) refuses this itself with EINVAL, but a move across filesystems is a copy
+    // followed by a delete and would hit the same runaway recursion the copy does.
+    for (const QString &source : sources) {
+        if (destinationIsInsideSource(source, destinationDir)) {
+            emit failed(id, QStringLiteral("cannot move %1 into itself")
+                                .arg(QFileInfo(source).fileName()));
+            return;
+        }
+    }
 
     JournalEntry entry;
     entry.kind = JournalEntry::Moved;

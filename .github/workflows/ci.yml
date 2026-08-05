@@ -42,8 +42,12 @@ jobs:
             cd tests
             qmake6 tests.pro
             make -j"$(nproc)"
-            cd ..
+            cd qml
+            qmake6 qml.pro
+            make -j"$(nproc)"
+            cd ../..
             QT_QPA_PLATFORM=offscreen ./build/tests/tst_omafile
+            QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software ./build/tests/tst_omafile_qml
           '
 
       - name: Package

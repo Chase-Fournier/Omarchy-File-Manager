@@ -73,6 +73,16 @@ bool runHeld(const QString &shellCommand, const QString &workingDir)
                workingDir);
 }
 
+QString shellQuote(const QString &word)
+{
+    // Inside single quotes a POSIX shell treats everything literally, with exactly one
+    // exception: the single quote itself, which cannot be escaped there at all. So it is
+    // closed, escaped outside the quotes, and reopened — 'it'\''s'.
+    QString quoted = word;
+    quoted.replace(QLatin1Char('\''), QLatin1String("'\\''"));
+    return QLatin1Char('\'') + quoted + QLatin1Char('\'');
+}
+
 QStringList editorCommand()
 {
     QString editor = QString::fromLocal8Bit(qgetenv("VISUAL"));

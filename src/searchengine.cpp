@@ -2,6 +2,7 @@
 
 #include "fuzzyscorer.h"
 #include "mounts.h"
+#include "terminal.h"
 
 #include <QElapsedTimer>
 #include <QFile>
@@ -175,9 +176,13 @@ void SearchEngine::searchNames(const QString &root, const QString &query, quint6
         process.setProgram(QStringLiteral("ssh"));
         process.setArguments({ QStringLiteral("-o"), QStringLiteral("BatchMode=yes"),
                                sshHost,
+                               // ssh always runs its command through the remote shell,
+                               // so the path has to survive that shell intact — a
+                               // directory named "Bob's" is enough to break it, and a
+                               // crafted one would run commands on the far end.
                                QStringLiteral("fd %1 -- %2")
                                    .arg(fdArguments.join(QLatin1Char(' ')),
-                                        QStringLiteral("'%1'").arg(remotePrefix)) });
+                                        Terminal::shellQuote(remotePrefix)) });
     } else {
         QStringList arguments = fdArguments;
         // §10.6: never silently walk a slow mount to completion. The fallback is bounded.

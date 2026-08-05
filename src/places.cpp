@@ -707,7 +707,7 @@ void Places::connectInTerminal(const QString &hostAlias)
         QStringLiteral("sshfs %1: %2 -o reconnect,ServerAliveInterval=15,"
                        "ServerAliveCountMax=3,cache_timeout=60,kernel_cache,"
                        "compression=no,idmap=user")
-            .arg(hostAlias, target);
+            .arg(Terminal::shellQuote(hostAlias), Terminal::shellQuote(target));
 
     // Held open on failure so the error is readable rather than flashing past.
     if (!Terminal::runHeld(command)) {

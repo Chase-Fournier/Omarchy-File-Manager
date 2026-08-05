@@ -58,11 +58,15 @@ src/operations.*      the QML-facing front for ops, clipboard, journal, conflict
 src/clipboard.*       system clipboard in the formats other file managers read
 src/opener.*          xdg-open and new windows
 src/theme.*           Omarchy theme parsing + hot reload
-src/qml/Main.qml      the window
+src/qml/Main.qml      the window: verbs, keyboard, list, drag, overlay wiring
+src/qml/Breadcrumb.qml where you are — crumbs, their drop targets, the Ctrl+L field
+src/qml/StatusBar.qml the one line at the bottom
+src/qml/Menus.qml     what each right-click menu contains (pure data, no layout)
 src/qml/EntryRow.qml  one row: name, drag source, inline rename
 src/qml/Overlay.qml   the single modal surface
 src/qml/Shortcuts.qml the keyboard map, single source of truth (§5)
 tests/                one binary, one suite per class, registered in tests/main.cpp
+tests/qml/            the QML suite — a second binary, see below
 ```
 
 ---
@@ -125,7 +129,7 @@ Three menus, all in `src/qml/ContextMenu.qml`: one for a row, one for blank spac
 a sidebar place — the blank-space menu also answers the strip beside the breadcrumb.
 Dismissing passes the click through to whatever it hit. All four surfaces are verified
 with real injected clicks, not just screenshots; `FileOps::makeFile` is covered by
-`tst_fileops::newFileNeverTruncates`. 206 tests pass.
+`tst_fileops::newFileNeverTruncates`. 209 C++ tests and 7 QML tests pass.
 
 ---
 
@@ -189,6 +193,113 @@ a stray right-click cost something. Verified with real clicks in both directions
   height still reads as empty and the clamp does nothing. As a binding it corrects itself
   once the real size arrives. This is the same layout-timing class of bug as the drag badge
   and the Overlay focus grab — the third instance in this project.
+
+### The QML layer has tests now
+
+**`tests/qml/` is a second binary, `tst_omafile_qml`.** It has to be: QtQuickTest needs a
+`QGuiApplication` and a scene graph, where `tst_omafile` deliberately runs headless under
+`QCoreApplication`. Both are built and run by `bin/test` and by CI. It runs with
+`QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software` — no GPU required, which is what
+makes it work on a CI runner; verified in the same `archlinux:latest` container CI uses.
+
+**Components are tested on their own, with a stubbed `app`.** `ContextMenu` needs nothing
+but the properties it reads off the window — pad, rowHeight, fonts, colours — so the tests
+supply a `QtObject` with those and never construct the model, the ops thread or a
+directory. Only `Theme` is registered for real, because the components import it.
+
+**The tests were confirmed to fail against the bugs they describe.** Re-introducing
+`longest.implicitWidth` reproduces `panel width is 0 — NaN collapses to 0`, and making the
+dismissal accept the press reproduces `the click was swallowed instead of passing
+through`. Both took an afternoon and a screenshot to find the first time; they now fail in
+36 ms. A UI test that has never been seen to fail is decoration.
+
+**Two things about the harness that are not obvious:**
+
+- **A `Loader` cannot build a component with an unset `required property`.** Setting
+  `source:` and assigning in `onLoaded` is too late — the load fails *silently*, leaving
+  `item` null and every test reporting "cannot call openAt of null" rather than anything
+  about the real cause. Use `setSource(url, { "app": stub })`.
+- **A C++ `DEFINES +=` is invisible to QML.** The component path is relative to the test
+  file instead.
+
+### Main.qml is 979 lines, down from 1238
+
+Three pieces came out, chosen for having no layout coupling to the rest of the window:
+`Menus.qml` (the menu entries — pure data), `StatusBar.qml`, and `Breadcrumb.qml`.
+
+**The call sites did not move.** `EntryRow`, `Sidebar` and the blank-space areas still call
+`app.menuForRow` and friends; those are now one-line wrappers onto `menus.forRow`. A
+refactor that also rewrites its callers cannot be checked against "nothing changed".
+
+**`pathField` was the coupling worth removing.** Main.qml reached into the text field from
+four places to set its text, focus it and read it back. `Breadcrumb` now exposes
+`beginEditing(path)` and `editedPath()` and owns the field.
+
+**Note that QML resolves ids at runtime.** After moving the field, Main.qml still referred
+to `pathField` and *the build succeeded* — Ctrl+L would have failed at the moment it was
+pressed. Grep for the ids you moved; the compiler will not.
+
+**The split costs nothing at startup** — median 112 ms against 111 ms before, on 15 samples
+each. qtquickcompiler builds every .qml into the binary, so more files is not more I/O.
+Worth having measured rather than assumed, since §12 is the tightest budget here.
+
+**Verified by screenshot and by hand**, not only by the suite: the window renders
+identically, Ctrl+L still turns the breadcrumb into a populated, selected field, and both
+the row and place menus still build with the right entries and the right ones greyed out.
+A pixel-diff of before and after is *not* a useful check here — the directory being shown
+is the repo itself, so the listing legitimately changed when these files were added.
+
+### Copying a folder into itself
+
+**`FileOps::copy` and `move` refuse a destination inside the source.** `copyTree` lists
+each directory's children *after* creating the level below, so copying `a` into `a/b` put
+the fresh copy where the next listing would find it and copy it again: down to PATH_MAX,
+about a thousand levels, re-writing every file in the source every couple of levels. A
+1 GB folder wrote hundreds of gigabytes before failing on ENAMETOOLONG.
+
+Reachable without doing anything unusual — copy a folder, step into one of its subfolders,
+paste. `Operations::paste` had no guard of any kind, and `dropUris`'s "already here" check
+(which the drag path does have) only compares the immediate parent, so it never saw this.
+Spring-loading during a drag reaches it too.
+
+The check is on **canonical** paths, so a symlink or a `..` cannot slip past it, and it
+compares against `source + "/"` so that `/home/a` does not swallow `/home/abc`.
+
+**The test asserts nothing was written, not that it failed.** Without the guard the old
+code *does* eventually fail — at PATH_MAX — so an assertion on the error message alone
+passes either way and proves nothing. What separates fixed from broken is whether
+`outer/inner/outer` exists. Confirmed by reverting the guard and watching that one
+assertion fail.
+
+### Shell strings
+
+**`Terminal::shellQuote` exists because two places built shell commands by concatenation.**
+Remote search sent `fd … -- '<path>'` to `ssh`, quoting the path by wrapping it in single
+quotes — which fails on the one character it needs to handle. A directory named `Bob's`
+broke the search; a crafted one ran commands on the far end. `connectInTerminal` did the
+same with the host alias and mount path into `sh -c`.
+
+Neither could be fixed by "quoting harder": inside single quotes a POSIX shell escapes
+nothing at all, so an embedded quote has to close, escape and reopen — `'it'\''s'`. This
+is §14's newline-in-a-filename hazard in different clothes, and it applies wherever a
+command is a *string* rather than an argument list: `sh -c`, and anything given to ssh,
+which always runs its command through the remote shell.
+
+**Tested by running the quoted word back through a real `sh`**, not by comparing strings —
+the property is "sh sees one argument, unchanged", and only sh can answer that. Covers
+`;`, `&&`, backticks, `$(…)`, a newline, a bare `'`, and the empty string.
+
+### QtQuick.Controls was linked but never used
+
+`omafile.pro` carried `quickcontrols2` from the M0 skeleton and `main.cpp` called
+`QQuickStyle::setStyle("Material")`, while **no QML imports QtQuick.Controls at all** —
+`ContextMenu.qml` was written in plain QtQuick specifically to avoid that cost. Both are
+gone; `libQt6QuickControls2` and `libQt6QuickTemplates2` are no longer load-time
+dependencies (12 Qt libraries down to 10).
+
+**It bought no measurable startup win** — median 113 ms before, 111 ms after, on 13 samples
+each, which is inside the noise. Recorded so nobody re-measures it hoping for more. The
+change stands on removing dead linkage and a dead call, not on speed.
 
 ### Dragging to somewhere that is not on screen
 
@@ -752,8 +863,9 @@ top of `measure_startup` already warned about exactly this hazard from the other
 same thing unremarked. Same binary, seconds apart: `bin/test` read a median of **175 ms**
 while a manual loop read **100 ms**.
 
-So `measure_startup` now settles for five seconds and throws away one warm-up run before
-sampling, and the budget sits at 140 with the measurement honest — median **99 ms**, and a
+So `measure_startup` now settles for fifteen seconds and throws away two warm-up runs
+before sampling — five seconds was enough when it built one test binary and stopped being
+enough when the QML suite made that two, and the budget sits at 140 with the measurement honest — median **99 ms**, and a
 number that would actually notice a regression. 160 was tried first, purely to out-wait
 the noise; once the noise had a cause, that was no longer necessary.
 

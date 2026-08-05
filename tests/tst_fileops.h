@@ -29,6 +29,7 @@ private slots:
     void copiesDirectoriesRecursively();
     void copiesSymlinksAsLinks();
     void refusesToCopyOntoItself();
+    void refusesToCopyIntoItsOwnSubdirectory();
 
     void conflictSkipLeavesTargetAlone();
     void conflictReplaceOverwrites();

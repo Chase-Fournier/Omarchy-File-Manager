@@ -20,6 +20,8 @@ private slots:
     void graphicalEditorsThatCannotWaitAreKnown();
     void editorCommandKeepsItsArguments();
     void visualBeatsEditor();
+    void shellQuotingSurvivesARealShell();
+    void shellQuotingClosesAndReopensForApostrophes();
 
 private:
     QByteArray m_realEditor;

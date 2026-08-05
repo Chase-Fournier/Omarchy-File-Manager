@@ -14,6 +14,15 @@ cd "$(dirname "$0")/.."
   make -j"$(nproc)"
 )
 
+# The QML suite is its own binary: it needs a QGuiApplication and a scene graph, where
+# tst_omafile runs headless under QCoreApplication. Built here with the rest so the
+# startup measurement below still happens after every compile has finished.
+(
+  cd tests/qml
+  qmake6 qml.pro
+  make -j"$(nproc)"
+)
+
 # Startup is measured *before* the suite, not after. The search budget test writes and
 # then deletes a 100k-file tree, and measuring cold start while the kernel is still
 # working through that produced a phantom 60 ms regression and 600 ms outliers.
@@ -31,7 +40,11 @@ measure_startup() {
     return 0
   fi
 
-  sleep 5
+  # Long enough to outlast three compiles' worth of writeback and CPU heat. Five seconds
+  # was enough when this built one test binary; it is not enough now that it builds two,
+  # and the symptom is a startup "regression" that a settled machine cannot reproduce.
+  sleep 15
+  OMAFILE_TRACE_STARTUP=quit timeout 20 ./build/omafile >/dev/null 2>&1 || true
   OMAFILE_TRACE_STARTUP=quit timeout 20 ./build/omafile >/dev/null 2>&1 || true
 
   for _ in {1..11}; do
@@ -63,5 +76,11 @@ measure_startup() {
 startup_status=0
 measure_startup || startup_status=1
 
-QT_QPA_PLATFORM=offscreen ./build/tests/tst_omafile
-exit $startup_status
+suite_status=0
+QT_QPA_PLATFORM=offscreen ./build/tests/tst_omafile || suite_status=1
+
+# QT_QUICK_BACKEND=software: no GPU on a CI runner, and none needed to lay out a menu.
+QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software \
+  ./build/tests/tst_omafile_qml || suite_status=1
+
+exit $(( startup_status | suite_status ))

@@ -1,4 +1,8 @@
-QT += quick quickcontrols2
+# quick only. quickcontrols2 was here from the skeleton and nothing ever imported
+# QtQuick.Controls — ContextMenu.qml is written in plain QtQuick specifically to avoid it
+# (§12). Linking it anyway made libQt6QuickControls2 and libQt6QuickTemplates2 load-time
+# dependencies of every start, which is the one budget with no room in it.
+QT += quick
 CONFIG += c++17 qtquickcompiler
 CONFIG -= debug_and_release
 

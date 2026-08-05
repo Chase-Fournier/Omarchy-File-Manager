@@ -14,7 +14,6 @@
 #include <QFileInfo>
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
-#include <QQuickStyle>
 #include <QQuickWindow>
 
 #include <cstdio>
@@ -99,8 +98,6 @@ int main(int argc, char *argv[])
     app.setApplicationName(QStringLiteral("omafile"));
     app.setOrganizationName(QStringLiteral("omafile"));
     app.setDesktopFileName(QStringLiteral("omafile"));
-
-    QQuickStyle::setStyle(QStringLiteral("Material"));
 
     Theme theme;
     Settings settings;

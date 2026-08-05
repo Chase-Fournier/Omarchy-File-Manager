@@ -1,6 +1,9 @@
 <RCC>
     <qresource prefix="/">
         <file>qml/Main.qml</file>
+        <file>qml/Breadcrumb.qml</file>
+        <file>qml/Menus.qml</file>
+        <file>qml/StatusBar.qml</file>
         <file>qml/Shortcuts.qml</file>
         <file>qml/EntryRow.qml</file>
         <file>qml/SearchRow.qml</file>

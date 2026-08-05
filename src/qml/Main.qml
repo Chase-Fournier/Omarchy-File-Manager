@@ -99,88 +99,13 @@ Window {
     }
 
     // ── Right-click menus ────────────────────────────────────────────
-    // Every entry calls a verb that already exists for a shortcut, so the menu can never
-    // do something the keyboard cannot.
+    // The entries themselves live in Menus.qml; these keep the call sites — EntryRow,
+    // Sidebar and the two blank-space MouseAreas — talking to the window as before.
 
-    function menuForRow(index, x, y) {
-        if (index !== Dir.currentIndex) {
-            Dir.clearSelection()
-            Dir.currentIndex = index
-        }
-        const isDir = Dir.rowIsDir(index)
-        const remote = Ops.isRemote(Dir.rowPath(index))
-
-        contextMenu.openAt(x, y, [
-            { label: "Open", action: () => Dir.activate(index) },
-            { label: "Open in new window", action: () => Dir.activateInNewWindow(index) },
-            { label: "Open with…", enabled: !isDir, action: () => openWith() },
-            { separator: true },
-            { label: "Cut", action: () => cut() },
-            { label: "Copy", action: () => copy() },
-            { label: "Paste", enabled: isDir && Ops.canPaste,
-              action: () => Ops.paste(Dir.rowPath(index)) },
-            { label: "Copy path", action: () => copyPath() },
-            { separator: true },
-            { label: "Rename", action: () => beginRename() },
-            { label: "Bulk rename in $EDITOR", action: () => bulkRename() },
-            { separator: true },
-            // §10.6: no dependable trash on a network mount, so do not offer it there.
-            { label: "Move to trash", enabled: !remote, action: () => trash() },
-            { label: "Delete permanently", action: () => confirmDelete() },
-            { separator: true },
-            { label: "Terminal here",
-              action: () => Ops.openTerminal(isDir ? Dir.rowPath(index) : Dir.path) },
-        ])
-    }
-
-    function menuForBlankSpace(x, y) {
-        contextMenu.openAt(x, y, [
-            { label: "New file", action: () => promptNewFile() },
-            { label: "New folder", action: () => promptNewFolder() },
-            { separator: true },
-            { label: "Paste", enabled: Ops.canPaste, action: () => paste() },
-            { label: "Select all", action: () => Dir.selectAll() },
-            { separator: true },
-            { label: Dir.showHidden ? "Hide hidden files" : "Show hidden files",
-              action: () => toggleHidden() },
-            { label: "Terminal here", action: () => openTerminal() },
-            { label: "Refresh", action: () => refresh() },
-        ])
-    }
-
-    // Right-clicking a place. The "config" entries open the file that actually governs
-    // that place, rather than omafile inventing a settings screen for it (§1).
+    function menuForRow(index, x, y) { contextMenu.openAt(x, y, menus.forRow(index, x, y)) }
+    function menuForBlankSpace(x, y) { contextMenu.openAt(x, y, menus.forBlankSpace()) }
     function menuForPlace(index, kind, name, target, mounted, ejectable, x, y) {
-        const home = Dir.homePath
-        let entries = [
-            { label: "Open", action: () => Places.activate(index) },
-            { label: "Open in new window", enabled: kind !== 2 && kind !== 3,
-              action: () => Ops.openInNewWindow(target) },
-            { separator: true },
-        ]
-
-        // 2 = SshHost, 3 = RcloneRemote, 4 = Volume, 1 = Bookmark (Place::Kind).
-        if (kind === 2) {
-            entries.push({ label: "Edit ~/.ssh/config",
-                           action: () => Ops.openAtLine(home + "/.ssh/config", 1) })
-            entries.push({ label: "Connect in a terminal",
-                           action: () => Places.connectInTerminal(target) })
-        } else if (kind === 3) {
-            entries.push({ label: "Run rclone config",
-                           action: () => Ops.runInTerminal("rclone config") })
-        } else if (kind === 1) {
-            entries.push({ label: "Remove bookmark",
-                           action: () => Places.removeBookmark(target) })
-        }
-
-        if (mounted || ejectable)
-            entries.push({ label: "Eject / unmount", action: () => Places.eject(index) })
-
-        entries.push({ separator: true })
-        entries.push({ label: "Edit omafile config",
-                       action: () => Ops.openAtLine(Settings.configPath, 1) })
-
-        contextMenu.openAt(x, y, entries)
+        contextMenu.openAt(x, y, menus.forPlace(index, kind, name, target, mounted, ejectable))
     }
 
     function promptNewFile() {
@@ -442,15 +367,14 @@ Window {
     }
 
     function beginPathEdit() {
-        pathField.text = Dir.path
         editingPath = true
-        pathField.forceActiveFocus()
-        pathField.selectAll()
+        header.beginEditing(Dir.path)
     }
 
     function endPathEdit(commit) {
-        if (commit && pathField.text.length > 0)
-            Dir.navigate(pathField.text)
+        const typed = header.editedPath()
+        if (commit && typed.length > 0)
+            Dir.navigate(typed)
         editingPath = false
         keyboard.forceActiveFocus()
     }
@@ -737,141 +661,14 @@ Window {
                                 + (sidebar.visible ? sidebar.width + root.pad : 0)
 
             // ── Breadcrumb ────────────────────────────────────────────────
-            Item {
+            Breadcrumb {
                 id: header
 
+                app: root
+                editing: root.editingPath
                 anchors.top: parent.top
                 anchors.left: parent.left
                 anchors.right: parent.right
-                height: root.rowHeight
-
-                Row {
-                    id: crumbs
-
-                    anchors.verticalCenter: parent.verticalCenter
-                    visible: !root.editingPath
-                    spacing: 0
-
-                    Repeater {
-                        model: Dir.segments
-
-                        Row {
-                            required property int index
-                            required property string modelData
-                            spacing: 0
-
-                            Text {
-                                text: " / "
-                                visible: index > 0
-                                color: Theme.dim
-                                font.family: root.monoFamily
-                                font.pixelSize: root.fontSize
-                            }
-
-                            Text {
-                                id: crumb
-
-                                text: modelData
-                                color: index === Dir.segments.length - 1 ? Theme.fgBright : Theme.dim
-                                font.family: root.monoFamily
-                                font.pixelSize: root.fontSize
-
-                                MouseArea {
-                                    anchors.fill: parent
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: Dir.navigateToSegment(index)
-                                }
-
-                                // The way back out. Spring-loading takes you *into* a
-                                // folder mid-drag and there was nothing that took you
-                                // out again, nor any way to reach a directory above the
-                                // one in view — so the breadcrumb accepts a drag too:
-                                // hover to go there, drop to drop there.
-                                DropArea {
-                                    id: crumbDrop
-
-                                    // Wider than the text so a crumb is not a pixel-perfect
-                                    // target while something is held under the cursor —
-                                    // "~" is eight pixels of glyph. The horizontal reach
-                                    // covers the " / " between crumbs as well, so there
-                                    // is no dead gap to drop into by mistake.
-                                    anchors.fill: parent
-                                    anchors.leftMargin: -6
-                                    anchors.rightMargin: -6
-                                    anchors.topMargin: -4
-                                    anchors.bottomMargin: -4
-
-                                    onEntered: crumbSpring.restart()
-                                    onExited: crumbSpring.stop()
-                                    onDropped: function (drop) {
-                                        crumbSpring.stop()
-                                        root.acceptDrop(drop, Dir.segmentPath(index))
-                                    }
-
-                                    Timer {
-                                        id: crumbSpring
-
-                                        // Longer than the list's 300 ms: crumbs sit in a
-                                        // row, so several get crossed on the way to the
-                                        // one that was meant.
-                                        interval: 500
-                                        onTriggered: {
-                                            if (crumbDrop.containsDrag)
-                                                Dir.navigateToSegment(index)
-                                        }
-                                    }
-
-                                    Rectangle {
-                                        anchors.fill: parent
-                                        visible: crumbDrop.containsDrag
-                                        radius: 4
-                                        color: "transparent"
-                                        border.width: 1
-                                        border.color: Theme.accent
-                                        opacity: 0.8
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // The empty run to the right of the last crumb still *is* this directory,
-                // so it offers the same menu the blank space below the list does — it is
-                // the nearest thing to a title bar, and that is where a right-click looks
-                // for "new file" when the list is full to the bottom.
-                MouseArea {
-                    anchors.left: crumbs.right
-                    anchors.right: parent.right
-                    anchors.top: parent.top
-                    anchors.bottom: parent.bottom
-                    // Not while Ctrl+L has the path open for editing: the field covers
-                    // this whole strip and a right-click there belongs to the field.
-                    visible: !root.editingPath
-                    acceptedButtons: Qt.RightButton
-                    onClicked: function (event) {
-                        const point = mapToItem(root.contentItem, event.x, event.y)
-                        root.menuForBlankSpace(point.x, point.y)
-                    }
-                }
-
-                // Ctrl+L turns the breadcrumb into the same field it describes (§5).
-                TextInput {
-                    id: pathField
-
-                    anchors.verticalCenter: parent.verticalCenter
-                    anchors.left: parent.left
-                    anchors.right: parent.right
-                    visible: root.editingPath
-                    color: Theme.fgBright
-                    selectionColor: root.selectionBg
-                    selectedTextColor: root.selectionText
-                    font.family: root.monoFamily
-                    font.pixelSize: root.fontSize
-
-                    onAccepted: root.endPathEdit(true)
-                    Keys.onEscapePressed: root.endPathEdit(false)
-                }
             }
 
             // ── Filter line: absent entirely until something is typed ─────
@@ -1085,75 +882,13 @@ Window {
             }
 
             // ── Status bar ────────────────────────────────────────────────
-            Item {
+            StatusBar {
                 id: statusBar
 
+                app: root
                 anchors.bottom: parent.bottom
                 anchors.left: parent.left
                 anchors.right: parent.right
-                height: root.rowHeight
-
-                // A thin progress line, never a dialog (§8).
-                Rectangle {
-                    anchors.top: parent.top
-                    anchors.left: parent.left
-                    width: parent.width * Ops.progress
-                    height: 2
-                    visible: Ops.busy
-                    color: Theme.accent
-                }
-
-                Text {
-                    anchors.verticalCenter: parent.verticalCenter
-                    anchors.left: parent.left
-                    anchors.right: sortText.left
-                    anchors.rightMargin: 16
-                    elide: Text.ElideRight
-                    color: Ops.status.length > 0 ? Theme.fg : Theme.dim
-                    font.family: root.monoFamily
-                    font.pixelSize: root.fontSize - 1
-                    text: {
-                        if (Ops.busy)
-                            return Ops.progressName.length > 0
-                                 ? "… " + Ops.progressName : "working…"
-                        if (Ops.status.length > 0)
-                            return Ops.status
-                        if (Find.active) {
-                            let found = [Find.count + (Find.count === 1 ? " result" : " results")]
-                            if (Find.scanned > 0)
-                                found.push("of " + Find.scanned + " scanned")
-                            return found.join(" · ")
-                        }
-
-                        let parts = [Dir.count + (Dir.count === 1 ? " item" : " items")]
-                        if (Dir.filter.length > 0)
-                            parts.push("of " + Dir.totalCount)
-                        if (Dir.selectionCount > 0)
-                            parts.push(Dir.selectionCount + " selected")
-                        else if (Dir.currentName.length > 0)
-                            parts.push(Dir.currentName)
-                        if (Dir.currentSizeText.length > 0 && Dir.selectionCount === 0)
-                            parts.push(Dir.currentSizeText)
-                        return parts.join(" · ")
-                    }
-                }
-
-                Text {
-                    id: sortText
-
-                    anchors.verticalCenter: parent.verticalCenter
-                    anchors.right: parent.right
-                    color: Theme.dim
-                    font.family: root.monoFamily
-                    font.pixelSize: root.fontSize - 1
-                    text: {
-                        const sort = Dir.sortMode === DirectoryModel.SortName ? "name"
-                                   : Dir.sortMode === DirectoryModel.SortSize ? "size" : "time"
-                        return (Dir.showHidden ? " · " : "")
-                             + sort + (Dir.sortReversed ? " ▴" : " ▾")
-                             + "    Ctrl+?"
-                    }
-                }
             }
         }
     }
@@ -1161,6 +896,12 @@ Window {
     // ── Modal surfaces ───────────────────────────────────────────────
     // Declared after the list on purpose: QML paints in declaration order, so anything
     // that covers the content has to come after it.
+    Menus {
+        id: menus
+
+        app: root
+    }
+
     ContextMenu {
         id: contextMenu
 

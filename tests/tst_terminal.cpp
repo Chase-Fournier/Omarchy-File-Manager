@@ -2,6 +2,7 @@
 
 #include "terminal.h"
 
+#include <QProcess>
 #include <QTest>
 
 void TestTerminal::initTestCase()
@@ -109,4 +110,46 @@ void TestTerminal::visualBeatsEditor()
     qputenv("EDITOR", "vi");
     qputenv("VISUAL", "nvim");
     QCOMPARE(Terminal::editorCommand().first(), QStringLiteral("nvim"));
+}
+
+// Verified by running the result through a real shell rather than by comparing strings:
+// the property that matters is "sh sees exactly one argument, unchanged", and only sh can
+// answer that. A path is user input — §14 already treats a newline in a filename as the
+// classic breakage for anything that shells out, and this is the same hazard.
+void TestTerminal::shellQuotingSurvivesARealShell()
+{
+    const QStringList awkward = {
+        QStringLiteral("plain"),
+        QStringLiteral("Bob's files"),               // the case naive '%1' wrapping breaks
+        QStringLiteral("two words"),
+        QStringLiteral("semi;colon && echo pwned"),
+        QStringLiteral("$HOME `id` $(id)"),
+        QStringLiteral("new\nline"),
+        QStringLiteral("quote\"double\""),
+        QStringLiteral("back\\slash"),
+        QStringLiteral("* ? [glob]"),
+        QStringLiteral("'"),
+        QStringLiteral(""),
+    };
+
+    for (const QString &word : awkward) {
+        QProcess shell;
+        // printf %s, not echo: echo mangles backslashes on some shells.
+        shell.start(QStringLiteral("sh"),
+                    { QStringLiteral("-c"),
+                      QStringLiteral("printf %s ") + Terminal::shellQuote(word) });
+        QVERIFY2(shell.waitForFinished(5000), qPrintable(word));
+        QCOMPARE(shell.exitCode(), 0);
+        QCOMPARE(QString::fromUtf8(shell.readAllStandardOutput()), word);
+    }
+}
+
+// The one character that cannot be escaped inside single quotes has to leave them.
+void TestTerminal::shellQuotingClosesAndReopensForApostrophes()
+{
+    QCOMPARE(Terminal::shellQuote(QStringLiteral("it's")),
+             QStringLiteral("'it'\\''s'"));
+    QCOMPARE(Terminal::shellQuote(QStringLiteral("plain")), QStringLiteral("'plain'"));
+    // An empty word must still be one (empty) argument, not nothing at all.
+    QCOMPARE(Terminal::shellQuote(QString()), QStringLiteral("''"));
 }

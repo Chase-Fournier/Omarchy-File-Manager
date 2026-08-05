@@ -271,6 +271,53 @@ void TestFileOps::refusesToCopyOntoItself()
     QVERIFY(QFileInfo::exists(path(QStringLiteral("work/self (2).txt"))));
 }
 
+// Copying a directory into its own descendant used to walk a tree it was growing as it
+// went: each level was listed after the level below had been created, so the fresh copy
+// appeared in the next listing and was copied again, down to PATH_MAX. A 1 GB folder
+// wrote hundreds of gigabytes before failing. Reachable by ordinary means — copy a
+// folder, step into one of its subfolders, paste.
+void TestFileOps::refusesToCopyIntoItsOwnSubdirectory()
+{
+    write(QStringLiteral("outer/inner/keep.txt"), "payload");
+    const QString outer = path(QStringLiteral("outer"));
+    const QString inner = path(QStringLiteral("outer/inner"));
+
+    QString failure;
+    runOperation([&](FileOps *ops, quint64 id) { ops->copy({ outer }, inner, id); }, &failure);
+    QVERIFY2(!failure.isEmpty(), "copying a directory into its own child must be refused");
+
+    // Nothing may be written at all: the damage is what gets created before it gives up.
+    QVERIFY(!QFileInfo::exists(path(QStringLiteral("outer/inner/outer"))));
+
+    // Into itself, which is what pasting a folder inside itself does.
+    runOperation([&](FileOps *ops, quint64 id) { ops->copy({ outer }, outer, id); }, &failure);
+    QVERIFY(!failure.isEmpty());
+    QVERIFY(!QFileInfo::exists(path(QStringLiteral("outer/outer"))));
+
+    // A move across a filesystem is a copy plus a delete, so it needs the same guard —
+    // and a refused move must not have removed the source on its way out.
+    runOperation([&](FileOps *ops, quint64 id) { ops->move({ outer }, inner, id); }, &failure);
+    QVERIFY(!failure.isEmpty());
+    QCOMPARE(readAll(path(QStringLiteral("outer/inner/keep.txt"))), QByteArray("payload"));
+
+    // A symlink pointing back inside the source must not get past the check either.
+    QVERIFY(QFile::link(inner, path(QStringLiteral("link-to-inner"))));
+    runOperation([&](FileOps *ops, quint64 id) {
+        ops->copy({ outer }, path(QStringLiteral("link-to-inner")), id);
+    }, &failure);
+    QVERIFY2(!failure.isEmpty(), "a symlink into the source is still inside the source");
+
+    // And the ordinary case still works: a sibling directory is not a descendant, and
+    // neither is a sibling whose name merely starts with the source's.
+    QVERIFY(QDir().mkpath(path(QStringLiteral("outerly"))));
+    const JournalEntry entry = runOperation([&](FileOps *ops, quint64 id) {
+        ops->copy({ outer }, path(QStringLiteral("outerly")), id);
+    }, &failure);
+    QVERIFY2(failure.isEmpty(), qPrintable(failure));
+    QCOMPARE(readAll(path(QStringLiteral("outerly/outer/inner/keep.txt"))), QByteArray("payload"));
+    QCOMPARE(entry.kind, JournalEntry::Copied);
+}
+
 void TestFileOps::conflictSkipLeavesTargetAlone()
 {
     write(QStringLiteral("work/src/f.txt"), "new");
