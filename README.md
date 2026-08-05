@@ -1,20 +1,14 @@
-# omafile
+# OmaFile
 
 **Open a folder in a blink, find anything by typing, act on it without touching the mouse — and drag it out when you want to.**
 
-A dead-simple file manager for Omarchy, in the shape of omacut and omawrite.
+A dead-simple file manager for Omarchy
 
 ![omafile](docs-screenshot.png)
 
 ## Why
 
-Nautilus is the odd one out in Omarchy. It ignores the universal `Super+C/X/V` clipboard
-convention, it can't be rebound, it's slow to open, and it doesn't look like the rest of
-Quattro. omafile is the file manager that behaves like the rest of the desktop.
-
-It reads Omarchy's theme and re-colours itself the instant you run `omarchy theme set`. It
-opens in about 110 ms. It uses the same Nerd Font glyphs as your terminal. Every letter
-key you press filters the directory, exactly like the launcher.
+Nautilus has never really fit with Omarchy, but other Tui file manager like Yazi lack creature comforts like drag and drop. Omafile was built to be a middle ground, quick and themed, but keeps needed functionality at your fingertips.
 
 ## Install
 
@@ -161,16 +155,6 @@ preview = "remember"
 
 omafile never writes to it. What it remembers between sessions lives in
 `~/.local/state/omafile/state.toml`.
-
-## Non-goals
-
-- No dual-pane, no miller columns, no tabs. One window, one location; `Ctrl+N` for another.
-- No settings UI.
-- No plugins, no scripting API, no extensions.
-- No trash browser beyond undo and "open the trash folder".
-- No protocol implementations beyond what a mount helper already provides.
-- No credential storage, no OAuth flows, no "add account" wizards.
-- No file-type-associations editor — that is `xdg-mime`'s job.
 
 ## Dependencies
 
