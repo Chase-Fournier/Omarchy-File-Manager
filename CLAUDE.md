@@ -125,7 +125,7 @@ Three menus, all in `src/qml/ContextMenu.qml`: one for a row, one for blank spac
 a sidebar place — the blank-space menu also answers the strip beside the breadcrumb.
 Dismissing passes the click through to whatever it hit. All four surfaces are verified
 with real injected clicks, not just screenshots; `FileOps::makeFile` is covered by
-`tst_fileops::newFileNeverTruncates`. 197 tests pass.
+`tst_fileops::newFileNeverTruncates`. 205 tests pass.
 
 ---
 
@@ -189,6 +189,37 @@ a stray right-click cost something. Verified with real clicks in both directions
   height still reads as empty and the clamp does nothing. As a binding it corrects itself
   once the real size arrives. This is the same layout-timing class of bug as the drag badge
   and the Overlay focus grab — the third instance in this project.
+
+### Opening things (terminals and editors)
+
+**A window that opens and shuts is this bug, twice over.** "Edit ~/.ssh/config", "edit
+omafile config" and bulk rename all flashed, from two independent causes that produce the
+identical symptom:
+
+- **$TERMINAL is `xdg-terminal-exec` here, and it does not take `-e`.** The launchers that
+  implement the Default Terminal specification take the command directly; only the
+  emulators want `-e`. Handed a `-e` it does not understand, xdg-terminal-exec opened
+  nothing at all — measured, not guessed.
+- **$EDITOR is `code`, which returns in 0.2 s.** A graphical editor hands the file to the
+  instance already running and exits, so the terminal wrapped around it exits too. For
+  bulk rename this is worse than cosmetic: the edit is "finished" before it has begun, and
+  the rename would be applied to an untouched file.
+
+**Opening a file uses the desktop's own editor** — `xdg-open`, the same thing a double
+click reaches. omafile does not pick an editor. The single exception is a line number,
+which xdg-open cannot express: a *terminal* editor is run with `+N` so a content-search
+hit still lands on its line, and anything else opens at the top.
+
+**The list names the terminal editors, not the graphical ones.** Inverting it that way
+makes the unknown case safe: an editor nobody here anticipated is handed to the desktop,
+which is at worst unhelpful, rather than gambled on a terminal that vanishes. The only
+place the distinction cannot be dodged is bulk rename, which waits for the editor to exit
+— a graphical editor needs `--wait`, and one that cannot be told to wait is refused with a
+message rather than quietly renaming nothing.
+
+**All of it lives in `src/terminal.*` because it previously lived in two places and grew
+the same bug in both.** `Operations` and `Places` each had their own copy of "find a
+terminal and put `-e` in front". `tst_terminal` pins both halves.
 
 ### CI
 

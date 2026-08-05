@@ -2,6 +2,7 @@
 
 #include <QFileInfo>
 #include <QProcess>
+#include <QSet>
 #include <QStandardPaths>
 
 namespace {
@@ -70,6 +71,39 @@ bool runHeld(const QString &shellCommand, const QString &workingDir)
     return run({ QStringLiteral("sh"), QStringLiteral("-c"),
                  shellCommand + QStringLiteral("; echo; echo '[press enter to close]'; read _") },
                workingDir);
+}
+
+QStringList editorCommand()
+{
+    QString editor = QString::fromLocal8Bit(qgetenv("VISUAL"));
+    if (editor.isEmpty())
+        editor = QString::fromLocal8Bit(qgetenv("EDITOR"));
+    return QProcess::splitCommand(editor);
+}
+
+bool editorIsTerminal(const QString &program)
+{
+    static const QSet<QString> terminalEditors = {
+        QStringLiteral("vi"),    QStringLiteral("vim"),   QStringLiteral("nvim"),
+        QStringLiteral("nano"),  QStringLiteral("pico"),  QStringLiteral("micro"),
+        QStringLiteral("emacs"), QStringLiteral("hx"),    QStringLiteral("helix"),
+        QStringLiteral("kak"),   QStringLiteral("joe"),   QStringLiteral("ne"),
+        QStringLiteral("ed"),
+    };
+    return terminalEditors.contains(program);
+}
+
+QStringList editorWaitArgs(const QString &program)
+{
+    // The editors that can be told to stay in the foreground all spell it the same way.
+    static const QSet<QString> waits = {
+        QStringLiteral("code"),   QStringLiteral("code-insiders"),
+        QStringLiteral("codium"), QStringLiteral("vscodium"),
+        QStringLiteral("cursor"), QStringLiteral("windsurf"),
+        QStringLiteral("subl"),   QStringLiteral("sublime_text"),
+        QStringLiteral("zed"),    QStringLiteral("zeditor"),
+    };
+    return waits.contains(program) ? QStringList{ QStringLiteral("--wait") } : QStringList{};
 }
 
 bool openAt(const QString &directory)

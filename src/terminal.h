@@ -28,4 +28,28 @@ bool runHeld(const QString &shellCommand, const QString &workingDir = QString())
 // Just a terminal, no command — "terminal here".
 bool openAt(const QString &directory);
 
+// ── Editors ──────────────────────────────────────────────────────────────────
+//
+// A terminal editor is handed to a terminal, which stays open for as long as it runs. A
+// graphical one must not be: given to a terminal it hands the file to the instance
+// already running and returns within a fifth of a second, so the window opens and closes
+// again before it can be read. That is what made "edit ~/.ssh/config", "edit omafile
+// config" and bulk rename all flash.
+//
+// So the terminal editors are the ones named, not the graphical ones. The list is short
+// and it does not change, and an editor nobody here has heard of is opened the way the
+// desktop opens it rather than gambling a terminal on it.
+
+// $VISUAL, else $EDITOR, split into a command line — it may carry arguments
+// ("nvim -u NONE"), so it is not simply a program name.
+QStringList editorCommand();
+
+// Whether that program lives in a terminal. Anything else belongs to the desktop.
+bool editorIsTerminal(const QString &program);
+
+// What makes a graphical editor stay in the foreground until the file is closed — the
+// one thing bulk rename cannot do without, since it waits on the editor exiting. Empty
+// means there is no way to ask, which is a refusal rather than something to paper over.
+QStringList editorWaitArgs(const QString &program);
+
 } // namespace Terminal

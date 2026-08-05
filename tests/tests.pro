@@ -24,6 +24,7 @@ SOURCES += \
     tst_remote.cpp \
     tst_search.cpp \
     tst_settings.cpp \
+    tst_terminal.cpp \
     tst_theme.cpp \
     ../src/bulkrename.cpp \
     ../src/directorymodel.cpp \
@@ -58,6 +59,7 @@ HEADERS += \
     tst_remote.h \
     tst_search.h \
     tst_settings.h \
+    tst_terminal.h \
     tst_theme.h \
     ../src/bulkrename.h \
     ../src/directorymodel.h \
