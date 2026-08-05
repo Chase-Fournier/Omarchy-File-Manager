@@ -298,6 +298,74 @@ void TestDirectoryModel::navigationSelectsTheDirectoryJustLeft()
     QCOMPARE(model.currentName(), QStringLiteral("beta"));
 }
 
+// Walking up a path and back down should retrace it: the sequence
+// downloads -> ~ -> home -> / must come back / -> home -> ~ -> downloads without having
+// to hunt for the right row at each level.
+void TestDirectoryModel::remembersWhereTheCursorWasInEachDirectory()
+{
+    write(QStringLiteral("home/chase/downloads/keep"));
+    write(QStringLiteral("home/chase/documents/keep"));
+    write(QStringLiteral("home/other/keep"));
+    write(QStringLiteral("var/keep"));
+
+    DirectoryModel model;
+    const auto enter = [&](const QString &name) {
+        const int row = indexOfName(model, name);
+        QVERIFY(row >= 0);
+        model.setCurrentIndex(row);
+        model.activate(row);
+        QVERIFY(waitForIdle(&model));
+    };
+
+    model.setLocation(Location::fromLocalPath(m_dir.path()));
+    QVERIFY(waitForIdle(&model));
+
+    // Down: root -> home -> chase -> downloads.
+    enter(QStringLiteral("home"));
+    enter(QStringLiteral("chase"));
+    enter(QStringLiteral("downloads"));
+    QCOMPARE(model.location().displayName(), QStringLiteral("downloads"));
+
+    // Up to the top again.
+    for (int i = 0; i < 3; ++i) {
+        model.goParent();
+        QVERIFY(waitForIdle(&model));
+    }
+    QCOMPARE(model.currentName(), QStringLiteral("home"));
+
+    // Back down: each level lands on the entry it was left on, not on the first row.
+    model.activate(model.currentIndex());
+    QVERIFY(waitForIdle(&model));
+    QCOMPARE(model.currentName(), QStringLiteral("chase"));
+
+    model.activate(model.currentIndex());
+    QVERIFY(waitForIdle(&model));
+    QCOMPARE(model.currentName(), QStringLiteral("downloads"));
+}
+
+// Anything asked for by name wins over what the cursor happened to be on last time.
+void TestDirectoryModel::cursorMemoryYieldsToAnExplicitSelection()
+{
+    write(QStringLiteral("sub/alpha.txt"));
+    write(QStringLiteral("sub/beta.txt"));
+    write(QStringLiteral("sub/gamma.txt"));
+
+    DirectoryModel model;
+    model.setLocation(Location::fromLocalPath(m_dir.path() + QStringLiteral("/sub")));
+    QVERIFY(waitForIdle(&model));
+    model.setCurrentIndex(indexOfName(model, QStringLiteral("gamma.txt")));
+
+    model.setLocation(Location::fromLocalPath(m_dir.path()));
+    QVERIFY(waitForIdle(&model));
+
+    // Returning would normally restore gamma.txt...
+    model.setLocation(Location::fromLocalPath(m_dir.path() + QStringLiteral("/sub")));
+    model.selectByName(QStringLiteral("alpha.txt"));
+    QVERIFY(waitForIdle(&model));
+    // ...but an explicit request outranks it.
+    QCOMPARE(model.currentName(), QStringLiteral("alpha.txt"));
+}
+
 void TestDirectoryModel::watcherAppliesDiffWithoutResetting()
 {
     write(QStringLiteral("a.txt"));

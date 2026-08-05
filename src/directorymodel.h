@@ -203,6 +203,13 @@ private:
 
     // Set by goParent so the directory just left is selected once the listing lands.
     QString m_pendingSelect;
+
+    // Where the cursor was in each directory previously visited, so walking back down a
+    // path lands on the same entries it came up through. Bounded, because a session that
+    // browses a hundred thousand directories should not remember all of them.
+    void rememberCursor();
+    QHash<QString, QString> m_cursorMemory;
+    QStringList m_cursorOrder;
     // Set by an operation's results, applied on the same listing boundary.
     QStringList m_pendingSelectNames;
 

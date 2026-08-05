@@ -24,6 +24,8 @@ private slots:
     void reportsBrokenSymlinks();
     void reportsPermissionDenied();
     void navigationSelectsTheDirectoryJustLeft();
+    void remembersWhereTheCursorWasInEachDirectory();
+    void cursorMemoryYieldsToAnExplicitSelection();
     void watcherAppliesDiffWithoutResetting();
     void sortingBySizeAndTime();
     void listing10kIsWithinBudget();

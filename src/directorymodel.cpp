@@ -188,6 +188,9 @@ void DirectoryModel::setLocation(const Location &location)
     if (!location.isValid() || location == m_location)
         return;
 
+    // Note where the cursor was before leaving, so coming back lands on it.
+    rememberCursor();
+
     m_location = location;
     emit locationChanged();
 
@@ -272,8 +275,12 @@ void DirectoryModel::onFinished(quint64 generation, int)
 
     QString keepName = currentName();
     if (!m_pendingSelect.isEmpty()) {
+        // An explicit request — --select, the directory just left, or what an operation
+        // produced — outranks anything remembered.
         keepName = m_pendingSelect;
         m_pendingSelect.clear();
+    } else if (keepName.isEmpty()) {
+        keepName = m_cursorMemory.value(m_location.toString());
     }
 
     m_all = std::move(m_incoming);
@@ -548,6 +555,25 @@ void DirectoryModel::restoreCurrentByName(const QString &name)
 
     // The selected file is gone; stay where it was rather than jumping to the top.
     setCurrentIndex(qBound(0, m_currentIndex, count() - 1));
+}
+
+// Cheap and bounded: a few hundred remembered positions is a rounding error next to one
+// directory listing, and forgetting the oldest is never surprising.
+void DirectoryModel::rememberCursor()
+{
+    constexpr int kRemembered = 256;
+
+    const QString name = currentName();
+    if (name.isEmpty() || !m_location.isValid())
+        return;
+
+    const QString key = m_location.toString();
+    if (!m_cursorMemory.contains(key))
+        m_cursorOrder.append(key);
+    m_cursorMemory.insert(key, name);
+
+    while (m_cursorOrder.size() > kRemembered)
+        m_cursorMemory.remove(m_cursorOrder.takeFirst());
 }
 
 void DirectoryModel::setLoading(bool loading)

@@ -131,6 +131,17 @@ filled in only for visible rows plus a 24-row buffer.
 **Batches land in one go rather than streaming.** Measurement says streaming is not needed
 yet — 10k entries complete in 7 ms. Revisit north of ~500k.
 
+**The cursor's position is remembered per directory, so a path retraces.** Walking
+`Downloads → ~ → /home → /` and then back down puts the cursor on `home`, then
+`warforged`, then `Downloads` — each level lands where it was left rather than on the
+first row. `goParent` already selected the directory just left; this generalises it to
+both directions and to any route, not just the one taken a moment ago.
+
+Precedence when a listing lands: an explicit request (`--select`, the directory just left,
+what an operation produced) beats the remembered position, which beats the first row. The
+map is bounded at 256 directories and lives in the window, not on disk — say the word if
+it should survive a restart.
+
 **The cursor moving and the cursor's row changing are different signals.** They were not,
 and it broke scrolling outright: scrolling asks for stats on the newly visible rows, the
 stats arrive, `onStatsReady` re-announced `currentIndexChanged` purely so the status bar
