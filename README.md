@@ -217,9 +217,15 @@ thing becomes `photos (2).zip` rather than overwriting the first.
 **Nothing is deleted.** An archive is a copy; the originals are exactly where you left
 them. `Ctrl+Z` removes the archive again.
 
+**Extract** unpacks an archive — zip, tar and its compressed variants, 7z, rar, iso —
+into a folder named after it, beside it. Always into a folder, never loose into the
+current directory, so an archive without a single root cannot strew itself across what you
+were looking at. The archive is kept. An entry trying to climb out with `..` is refused
+outright and the folder is removed rather than left half-populated.
+
 Anything that takes longer than a moment shows a progress bar and holds the window while
 it runs, so you cannot navigate away from a directory that is being written to. `Escape`
-cancels, and a cancelled archive is removed rather than left half-written.
+cancels, and a cancelled archive or extraction is removed rather than left half-written.
 
 All of it is libarchive's `bsdtar`, which ships as a dependency of `pacman` itself, so
 there is nothing extra to install. Paths inside the archive are relative to the folder

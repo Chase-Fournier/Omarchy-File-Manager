@@ -16,7 +16,8 @@ Item {
     Rectangle {
         anchors.top: parent.top
         anchors.left: parent.left
-        width: parent.width * Ops.progress
+        // Negative means indeterminate; the modal bar shows that, this one just waits.
+        width: parent.width * Math.max(0, Ops.progress)
         height: 2
         visible: Ops.busy
         color: Theme.accent

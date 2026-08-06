@@ -40,6 +40,10 @@ QtObject {
                                                             : "Pin to sidebar",
               action: () => app.pinSelection() },
             { label: "Compress…", action: () => app.compressSelection() },
+            // Only for something that looks like an archive; greyed out rather than
+            // hidden, so the entry does not move around between rows.
+            { label: "Extract", enabled: Ops.isArchive(Dir.rowPath(index)),
+              action: () => Ops.extract(Dir.rowPath(index), Dir.path) },
             { separator: true },
             { label: "Rename", action: () => app.beginRename() },
             { label: "Bulk rename in $EDITOR", action: () => app.bulkRename() },

@@ -49,6 +49,12 @@ public slots:
     // is a copy, and the originals are still there afterwards.
     void compress(const QStringList &sources, const QString &destinationDir,
                   const QString &archiveName, quint64 id);
+
+    // Unpack `archivePath` into a new folder named after it. Always a folder, never
+    // loose into the current directory: an archive with no single root would otherwise
+    // strew its contents across whatever you were looking at, and that is not undoable
+    // by eye. The archive itself is left alone.
+    void extract(const QString &archivePath, const QString &destinationDir, quint64 id);
     // §9: the whole edit lands as *one* undoable operation, or none of it does.
     void bulkRename(const QString &directory, const QStringList &originals,
                     const QStringList &edited, quint64 id);

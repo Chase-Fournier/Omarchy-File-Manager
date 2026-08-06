@@ -335,6 +335,36 @@ a stray right-click cost something. Verified with real clicks in both directions
   once the real size arrives. This is the same layout-timing class of bug as the drag badge
   and the Overlay focus grab — the third instance in this project.
 
+### Extracting
+
+**Always into a folder named after the archive, never loose into the current directory.**
+An archive with no single root — a "tarbomb" — would otherwise scatter its contents across
+whatever you were looking at, and there is no undoing that by eye. A collision steps aside
+the way a copy does: `photos (2)/`. The archive itself is kept, matching compression.
+
+**The suffix comes off whole.** `.tar.gz` is one suffix, not two; stripping only the last
+would name the folder `thing.tar`.
+
+**bsdtar's defaults are the security boundary, and they were checked rather than assumed.**
+A crafted archive containing `../escaped.txt` is refused outright — "Path contains '..'" —
+and nothing is written outside the folder. That is why `-P` must never be added: it is
+exactly the flag that turns the protection off. `extractionRefusesToEscapeItsFolder`
+builds such an archive with python and pins both halves: the failure, and the absence of
+the file.
+
+**The bar is indeterminate here, and that is a measurement, not laziness.** How many
+entries an archive holds cannot be known without reading it, and reading it costs about as
+much as extracting it: on a 39 MB `.tar.zst`, listing took 11 ms against 19 ms to extract.
+Paying ~50% more wall time to draw a more precise bar is the wrong trade, so extraction
+reports -1 and the entry names carry the information instead.
+
+**The progress states are tested in QML, not by screenshot.** bsdtar extracts eight
+thousand entries in about sixty milliseconds, so catching the bar mid-flight is a race the
+shutter loses — three attempts at a slow-enough archive all finished under 70 ms. The
+determinate fill, the clamp, the travelling block and Escape are pinned in
+`tests/qml/tst_overlay.qml` instead, and both bar states were confirmed to fail when
+broken.
+
 ### A running operation is modal now
 
 **§4 asked for "a thin progress line, never a dialog", and this is a deliberate departure**

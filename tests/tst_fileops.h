@@ -46,6 +46,11 @@ private slots:
     void compressingTwiceDoesNotClobber();
     void failedCompressionLeavesNothingBehind();
 
+    void extractsIntoAFolderOfItsOwn();
+    void extractionFolderDropsTheWholeSuffix();
+    void extractingTwiceDoesNotMerge();
+    void extractionRefusesToEscapeItsFolder();
+
     void journalIsBounded();
     void undoRestoresTrashedFiles();
     void undoReversesAMove();

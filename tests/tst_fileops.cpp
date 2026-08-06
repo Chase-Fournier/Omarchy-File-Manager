@@ -601,6 +601,123 @@ void TestFileOps::failedCompressionLeavesNothingBehind()
              "a failed compression left an archive behind");
 }
 
+// The pair of compress: what went in comes back out, byte for byte, and the archive is
+// still there afterwards.
+void TestFileOps::extractsIntoAFolderOfItsOwn()
+{
+    write(QStringLiteral("work/box/one.txt"), "first");
+    write(QStringLiteral("work/box/deep/two.txt"), "second");
+
+    QString failure;
+    runOperation([&](FileOps *ops, quint64 id) {
+        ops->compress({ path(QStringLiteral("work/box")) }, path(QStringLiteral("work")),
+                      QStringLiteral("box.zip"), id);
+    }, &failure);
+    QVERIFY2(failure.isEmpty(), qPrintable(failure));
+    QVERIFY(QDir(path(QStringLiteral("work/box"))).removeRecursively());
+
+    const JournalEntry entry = runOperation([&](FileOps *ops, quint64 id) {
+        ops->extract(path(QStringLiteral("work/box.zip")), path(QStringLiteral("work")), id);
+    }, &failure);
+    QVERIFY2(failure.isEmpty(), qPrintable(failure));
+
+    // Into "box/", named after the archive — never loose into the current directory.
+    QCOMPARE(readAll(path(QStringLiteral("work/box/box/one.txt"))), QByteArray("first"));
+    QCOMPARE(readAll(path(QStringLiteral("work/box/box/deep/two.txt"))), QByteArray("second"));
+
+    // The archive is kept, and undo removes only what extraction made.
+    QVERIFY2(QFileInfo::exists(path(QStringLiteral("work/box.zip"))),
+             "extracting consumed the archive");
+    QCOMPARE(entry.kind, JournalEntry::Created);
+    QCOMPARE(entry.created, QStringList { path(QStringLiteral("work/box")) });
+}
+
+// A ".tar.gz" is one suffix, not two: stripping only the last one would name the folder
+// "thing.tar".
+void TestFileOps::extractionFolderDropsTheWholeSuffix()
+{
+    write(QStringLiteral("work/thing/f.txt"), "x");
+
+    QString failure;
+    runOperation([&](FileOps *ops, quint64 id) {
+        ops->compress({ path(QStringLiteral("work/thing")) }, path(QStringLiteral("work")),
+                      QStringLiteral("thing.tar.gz"), id);
+    }, &failure);
+    QVERIFY2(failure.isEmpty(), qPrintable(failure));
+    QVERIFY(QDir(path(QStringLiteral("work/thing"))).removeRecursively());
+
+    runOperation([&](FileOps *ops, quint64 id) {
+        ops->extract(path(QStringLiteral("work/thing.tar.gz")), path(QStringLiteral("work")), id);
+    }, &failure);
+    QVERIFY2(failure.isEmpty(), qPrintable(failure));
+
+    QVERIFY(QFileInfo(path(QStringLiteral("work/thing"))).isDir());
+    QVERIFY2(!QFileInfo::exists(path(QStringLiteral("work/thing.tar"))),
+             "only the last suffix was stripped");
+}
+
+// Extracting the same archive twice must not merge into the first result.
+void TestFileOps::extractingTwiceDoesNotMerge()
+{
+    write(QStringLiteral("work/dup/a.txt"), "a");
+
+    QString failure;
+    runOperation([&](FileOps *ops, quint64 id) {
+        ops->compress({ path(QStringLiteral("work/dup")) }, path(QStringLiteral("work")),
+                      QStringLiteral("dup.zip"), id);
+    }, &failure);
+    QVERIFY2(failure.isEmpty(), qPrintable(failure));
+
+    // "dup" already exists here (it was never deleted), so the first extraction already
+    // has to step aside.
+    runOperation([&](FileOps *ops, quint64 id) {
+        ops->extract(path(QStringLiteral("work/dup.zip")), path(QStringLiteral("work")), id);
+    }, &failure);
+    QVERIFY2(failure.isEmpty(), qPrintable(failure));
+    QVERIFY(QFileInfo(path(QStringLiteral("work/dup (2)"))).isDir());
+
+    const JournalEntry second = runOperation([&](FileOps *ops, quint64 id) {
+        ops->extract(path(QStringLiteral("work/dup.zip")), path(QStringLiteral("work")), id);
+    }, &failure);
+    QVERIFY2(failure.isEmpty(), qPrintable(failure));
+    QCOMPARE(second.created, QStringList { path(QStringLiteral("work/dup (3)")) });
+
+    // And the original folder was never touched by either.
+    QCOMPARE(readAll(path(QStringLiteral("work/dup/a.txt"))), QByteArray("a"));
+}
+
+// An archive is untrusted input. An entry containing ".." must not be able to write
+// outside the folder made for it, and a failure must not leave that folder behind.
+void TestFileOps::extractionRefusesToEscapeItsFolder()
+{
+    // Built by hand: nothing omafile can create would contain such an entry.
+    const QString evil = path(QStringLiteral("work/evil.tar"));
+    QProcess python;
+    python.start(QStringLiteral("python3"),
+                 { QStringLiteral("-c"),
+                   QStringLiteral("import tarfile,io,sys\n"
+                                  "t=tarfile.open(sys.argv[1],'w')\n"
+                                  "d=b'pwned'\n"
+                                  "i=tarfile.TarInfo('../escaped.txt'); i.size=len(d)\n"
+                                  "t.addfile(i, io.BytesIO(d))\n"
+                                  "t.close()"),
+                   evil });
+    QVERIFY(python.waitForFinished(15000));
+    if (python.exitCode() != 0)
+        QSKIP("python3 unavailable to build the hostile archive");
+
+    QString failure;
+    runOperation([&](FileOps *ops, quint64 id) {
+        ops->extract(evil, path(QStringLiteral("work")), id);
+    }, &failure);
+
+    QVERIFY2(!failure.isEmpty(), "a traversing archive extracted without complaint");
+    QVERIFY2(!QFileInfo::exists(path(QStringLiteral("work/escaped.txt"))),
+             "an archive entry escaped its extraction folder");
+    QVERIFY2(!QFileInfo::exists(path(QStringLiteral("work/evil"))),
+             "a failed extraction left its folder behind");
+}
+
 void TestFileOps::journalIsBounded()
 {
     Journal journal;

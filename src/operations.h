@@ -59,6 +59,12 @@ public:
                               const QString &extension);
     // The formats libarchive can write here, as { name, extension } for the chooser.
     Q_INVOKABLE static QVariantList archiveFormats();
+
+    // Unpack an archive into a folder of its own beside it. The archive is kept.
+    Q_INVOKABLE void extract(const QString &archivePath, const QString &destinationDir);
+    // Whether this looks like something extract() could open, by extension — which is
+    // what decides whether the menu entry is offered at all.
+    Q_INVOKABLE static bool isArchive(const QString &path);
     // Runs a command in the user's terminal. Used for things that are interactive by
     // nature — `rclone config`, editing a dotfile — rather than reimplemented here.
     Q_INVOKABLE void runInTerminal(const QString &command, const QString &workingDir = QString());

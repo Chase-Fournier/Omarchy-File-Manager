@@ -263,6 +263,38 @@ void Operations::compress(const QStringList &paths, const QString &destinationDi
                               Q_ARG(QString, stem + extension), Q_ARG(quint64, operation));
 }
 
+bool Operations::isArchive(const QString &path)
+{
+    // By extension, because the alternative is opening every file in the listing to
+    // sniff it — the menu is built while the pointer is still moving.
+    static const QStringList suffixes = {
+        QStringLiteral(".zip"),     QStringLiteral(".tar"),
+        QStringLiteral(".tar.gz"),  QStringLiteral(".tgz"),
+        QStringLiteral(".tar.bz2"), QStringLiteral(".tbz2"), QStringLiteral(".tbz"),
+        QStringLiteral(".tar.xz"),  QStringLiteral(".txz"),
+        QStringLiteral(".tar.zst"), QStringLiteral(".tzst"),
+        QStringLiteral(".7z"),      QStringLiteral(".rar"),
+        QStringLiteral(".cbz"),     QStringLiteral(".cbr"),
+        QStringLiteral(".iso"),     QStringLiteral(".jar"),
+    };
+    for (const QString &suffix : suffixes) {
+        if (path.endsWith(suffix, Qt::CaseInsensitive))
+            return true;
+    }
+    return false;
+}
+
+void Operations::extract(const QString &archivePath, const QString &destinationDir)
+{
+    if (archivePath.isEmpty() || destinationDir.isEmpty())
+        return;
+
+    const quint64 operation = begin();
+    QMetaObject::invokeMethod(m_ops, "extract", Qt::QueuedConnection,
+                              Q_ARG(QString, archivePath), Q_ARG(QString, destinationDir),
+                              Q_ARG(quint64, operation));
+}
+
 void Operations::runInTerminal(const QString &command, const QString &workingDir)
 {
     if (!Terminal::runHeld(command, workingDir))

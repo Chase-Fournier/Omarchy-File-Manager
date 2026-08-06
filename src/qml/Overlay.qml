@@ -159,13 +159,39 @@ FocusScope {
                     radius: 2
                     color: Theme.bg
 
+                    // Determinate: how far along, when the total is known.
                     Rectangle {
                         // Clamped so a miscounted total cannot draw past the end of the
                         // track, and floored so the bar is visibly present at zero.
+                        visible: overlay.progress >= 0
                         width: parent.width * Math.max(0, Math.min(1, overlay.progress))
                         height: parent.height
                         radius: parent.radius
                         color: Theme.accent
+                    }
+
+                    // Indeterminate: a block that travels, for work whose length cannot be
+                    // known without doing it twice. Extraction is the case — counting the
+                    // entries first means decompressing the whole archive to throw the
+                    // answer away, which on a solid format costs about as much again as
+                    // the extraction itself.
+                    Rectangle {
+                        id: pulse
+
+                        visible: overlay.progress < 0
+                        width: parent.width * 0.25
+                        height: parent.height
+                        radius: parent.radius
+                        color: Theme.accent
+
+                        SequentialAnimation on x {
+                            running: pulse.visible
+                            loops: Animation.Infinite
+                            NumberAnimation { from: 0; to: bar.width - pulse.width
+                                              duration: 900; easing.type: Easing.InOutQuad }
+                            NumberAnimation { from: bar.width - pulse.width; to: 0
+                                              duration: 900; easing.type: Easing.InOutQuad }
+                        }
                     }
                 }
 

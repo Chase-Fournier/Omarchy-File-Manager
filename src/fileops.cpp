@@ -714,6 +714,117 @@ void FileOps::compress(const QStringList &sources, const QString &destinationDir
     emit finished(id, entry);
 }
 
+// "photos.tar.gz" -> "photos". The two-part suffixes have to come off together or the
+// folder ends up called "photos.tar".
+static QString archiveStem(const QString &fileName)
+{
+    static const QStringList doubles = { QStringLiteral(".tar.gz"),  QStringLiteral(".tar.bz2"),
+                                         QStringLiteral(".tar.xz"),  QStringLiteral(".tar.zst"),
+                                         QStringLiteral(".tar.lz"),  QStringLiteral(".tar.lzma") };
+    for (const QString &suffix : doubles) {
+        if (fileName.endsWith(suffix, Qt::CaseInsensitive))
+            return fileName.left(fileName.size() - suffix.size());
+    }
+    const int dot = fileName.lastIndexOf(QLatin1Char('.'));
+    return dot > 0 ? fileName.left(dot) : fileName;
+}
+
+void FileOps::extract(const QString &archivePath, const QString &destinationDir, quint64 id)
+{
+    beginOperation();
+
+    if (archivePath.isEmpty() || destinationDir.isEmpty()) {
+        emit failed(id, QStringLiteral("nothing to extract"));
+        return;
+    }
+    if (!QFileInfo::exists(archivePath)) {
+        emit failed(id, QStringLiteral("%1 does not exist")
+                            .arg(QFileInfo(archivePath).fileName()));
+        return;
+    }
+
+    const QString program = QStandardPaths::findExecutable(QStringLiteral("bsdtar"));
+    if (program.isEmpty()) {
+        emit failed(id, QStringLiteral("bsdtar is not installed (libarchive)"));
+        return;
+    }
+
+    // Its own folder, named after the archive, disambiguated like a copy would be.
+    const QString wanted = archiveStem(QFileInfo(archivePath).fileName());
+    QString target = joinPath(destinationDir, wanted);
+    if (QFileInfo::exists(target))
+        target = joinPath(destinationDir, suggestName(destinationDir, wanted));
+
+    if (!QDir().mkpath(target)) {
+        emit failed(id, QStringLiteral("could not create %1").arg(QFileInfo(target).fileName()));
+        return;
+    }
+
+    QProcess process;
+    process.setProgram(program);
+    // No -P: bsdtar's default refuses entries containing ".." and strips a leading "/",
+    // so a hostile archive cannot write outside the folder made for it. Verified against
+    // a crafted archive rather than assumed.
+    process.setArguments({ QStringLiteral("-x"), QStringLiteral("-v"),
+                           QStringLiteral("-f"), archivePath,
+                           QStringLiteral("-C"), target });
+    process.setReadChannel(QProcess::StandardError);
+    process.start();
+
+    if (!process.waitForStarted(5000)) {
+        QDir(target).removeRecursively();
+        emit failed(id, QStringLiteral("could not run bsdtar"));
+        return;
+    }
+
+    // How many entries an archive holds cannot be known without reading it, and reading
+    // it costs about as much as extracting it on a solid format — so the bar is
+    // indeterminate (-1) and the names carry the information instead.
+    QByteArray diagnostics;
+    while (process.state() != QProcess::NotRunning) {
+        if (cancelled()) {
+            process.kill();
+            process.waitForFinished(3000);
+            QDir(target).removeRecursively();
+            emit failed(id, QStringLiteral("cancelled"));
+            return;
+        }
+        if (!process.waitForReadyRead(200))
+            continue;
+
+        const QByteArray chunk = process.readAllStandardError();
+        diagnostics.append(chunk);
+        for (const QByteArray &line : chunk.split('\n')) {
+            if (line.startsWith("x "))
+                emit progress(id, -1.0, QString::fromLocal8Bit(line.mid(2)));
+        }
+    }
+    process.waitForFinished(3000);
+    diagnostics.append(process.readAllStandardError());
+
+    if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0) {
+        // Half an archive is not a result: take the folder with it so there is nothing
+        // to mistake for a finished extraction.
+        QDir(target).removeRecursively();
+        QString reason;
+        for (const QByteArray &line : diagnostics.split('\n')) {
+            if (line.startsWith("bsdtar: ")) {
+                reason = QString::fromLocal8Bit(line.mid(8)).trimmed();
+                break;
+            }
+        }
+        emit failed(id, reason.isEmpty() ? QStringLiteral("could not extract the archive")
+                                         : reason);
+        return;
+    }
+
+    JournalEntry entry;
+    entry.kind = JournalEntry::Created;
+    entry.created.append(target);
+    entry.summary = QStringLiteral("Extracted %1").arg(QFileInfo(archivePath).fileName());
+    emit finished(id, entry);
+}
+
 void FileOps::renameEntry(const QString &path, const QString &newName, quint64 id)
 {
     beginOperation();
