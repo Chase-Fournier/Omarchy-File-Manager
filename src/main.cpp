@@ -49,6 +49,7 @@ void printUsage()
     std::printf("omafile [path]\n"
                 "  path              directory or URI to open (default: $PWD)\n"
                 "  --select <file>   open the file's parent and preselect it\n"
+                "  --properties <f>  the same, with the properties panel open\n"
                 "  --sidebar         start with the sidebar open\n"
                 "  --no-sidebar      start with the sidebar closed\n"
                 "  --preview         start with the preview pane open\n"
@@ -65,7 +66,11 @@ Location startingLocation(const QStringList &arguments, QString *preselect)
     for (int i = 1; i < arguments.size(); ++i) {
         const QString argument = arguments.at(i);
 
-        if (argument == QLatin1String("--select") && i + 1 < arguments.size()) {
+        // --properties is --select that also opens the panel, which is what
+        // org.freedesktop.FileManager1's ShowItemProperties actually asks for.
+        if ((argument == QLatin1String("--select")
+             || argument == QLatin1String("--properties"))
+            && i + 1 < arguments.size()) {
             const QFileInfo target(arguments.at(i + 1));
             *preselect = target.fileName();
             return Location::fromLocalPath(target.absolutePath());
@@ -163,6 +168,15 @@ int main(int argc, char *argv[])
     model.setLocation(start);
     if (!preselect.isEmpty())
         model.selectByName(preselect);
+
+    // Asked for the panel: the request goes to the worker like any other, and the QML
+    // side opens it when the answer arrives.
+    for (int i = 1; i < app.arguments().size() - 1; ++i) {
+        if (app.arguments().at(i) == QLatin1String("--properties")) {
+            operations.requestDetails(QFileInfo(app.arguments().at(i + 1)).absoluteFilePath());
+            break;
+        }
+    }
 
     // OMAFILE_TRACE_STARTUP=1 prints ms to first painted frame; =quit also exits there,
     // which is how bin/test measures the cold-start budget.

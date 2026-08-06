@@ -5,6 +5,8 @@
 #include "handlers.h"
 #include "mounts.h"
 #include "opener.h"
+#include "formatting.h"
+#include "trash.h"
 #include "terminal.h"
 
 #include <QClipboard>
@@ -58,6 +60,9 @@ Operations::Operations(QObject *parent)
     connect(m_ops, &FileOps::conflict, this, &Operations::onConflict);
     connect(m_ops, &FileOps::finished, this, &Operations::onFinished);
     connect(m_ops, &FileOps::failed, this, &Operations::onFailed);
+    // Straight through: the details map is formatted by the panel, not by this class.
+    connect(m_ops, &FileOps::described, this,
+            [this](quint64, const QVariantMap &info) { emit details(info); });
 
     m_thread.start();
 
@@ -293,6 +298,62 @@ void Operations::extract(const QString &archivePath, const QString &destinationD
     QMetaObject::invokeMethod(m_ops, "extract", Qt::QueuedConnection,
                               Q_ARG(QString, archivePath), Q_ARG(QString, destinationDir),
                               Q_ARG(quint64, operation));
+}
+
+void Operations::requestDetails(const QString &path)
+{
+    if (path.isEmpty())
+        return;
+    // Deliberately not begin(): asking what a file is must not put a progress bar over
+    // the panel that is about to show the answer.
+    QMetaObject::invokeMethod(m_ops, "describe", Qt::QueuedConnection,
+                              Q_ARG(QString, path), Q_ARG(quint64, m_id));
+}
+
+void Operations::setExecutable(const QString &path, bool executable)
+{
+    if (path.isEmpty())
+        return;
+    const quint64 operation = begin();
+    QMetaObject::invokeMethod(m_ops, "setExecutable", Qt::QueuedConnection,
+                              Q_ARG(QString, path), Q_ARG(bool, executable),
+                              Q_ARG(quint64, operation));
+}
+
+void Operations::setWritable(const QString &path, bool writable)
+{
+    if (path.isEmpty())
+        return;
+    const quint64 operation = begin();
+    QMetaObject::invokeMethod(m_ops, "setWritable", Qt::QueuedConnection,
+                              Q_ARG(QString, path), Q_ARG(bool, writable),
+                              Q_ARG(quint64, operation));
+}
+
+void Operations::linkTo(const QString &targetPath, const QString &destinationDir)
+{
+    if (targetPath.isEmpty() || destinationDir.isEmpty())
+        return;
+
+    const quint64 operation = begin();
+    QMetaObject::invokeMethod(m_ops, "makeSymlink", Qt::QueuedConnection,
+                              Q_ARG(QString, targetPath), Q_ARG(QString, destinationDir),
+                              Q_ARG(QString, QStringLiteral("Link to %1")
+                                                 .arg(QFileInfo(targetPath).fileName())),
+                              Q_ARG(quint64, operation));
+}
+
+QString Operations::formatSize(qint64 bytes)
+{
+    return Formatting::humanSize(bytes);
+}
+
+QString Operations::trashFolder()
+{
+    // The home trash. A volume trash exists per mount point, but "open the trash" means
+    // the one the desktop shows, and that is this one.
+    const QString files = Trash::homeTrashDir() + QStringLiteral("/files");
+    return QFileInfo(files).isDir() ? files : QString();
 }
 
 void Operations::runInTerminal(const QString &command, const QString &workingDir)

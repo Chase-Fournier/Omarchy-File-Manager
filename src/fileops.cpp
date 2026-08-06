@@ -2,6 +2,7 @@
 
 #include "bulkrename.h"
 
+#include <QDateTime>
 #include <QDir>
 #include <QDirIterator>
 #include <QFile>
@@ -12,6 +13,8 @@
 #include <cerrno>
 #include <cstring>
 #include <fcntl.h>
+#include <grp.h>
+#include <pwd.h>
 #include <sys/stat.h>
 #include <sys/sendfile.h>
 #include <climits>
@@ -822,6 +825,168 @@ void FileOps::extract(const QString &archivePath, const QString &destinationDir,
     entry.kind = JournalEntry::Created;
     entry.created.append(target);
     entry.summary = QStringLiteral("Extracted %1").arg(QFileInfo(archivePath).fileName());
+    emit finished(id, entry);
+}
+
+// rwxr-xr-x, the way ls writes it — the form people actually read permissions in.
+static QString modeString(mode_t mode)
+{
+    static const char *rwx[] = { "---", "--x", "-w-", "-wx",
+                                 "r--", "r-x", "rw-", "rwx" };
+    QString out;
+    if (S_ISDIR(mode))       out += QLatin1Char('d');
+    else if (S_ISLNK(mode))  out += QLatin1Char('l');
+    else if (S_ISCHR(mode))  out += QLatin1Char('c');
+    else if (S_ISBLK(mode))  out += QLatin1Char('b');
+    else if (S_ISFIFO(mode)) out += QLatin1Char('p');
+    else if (S_ISSOCK(mode)) out += QLatin1Char('s');
+    else                     out += QLatin1Char('-');
+
+    out += QLatin1String(rwx[(mode >> 6) & 7]);
+    out += QLatin1String(rwx[(mode >> 3) & 7]);
+    out += QLatin1String(rwx[mode & 7]);
+    return out;
+}
+
+void FileOps::describe(const QString &path, quint64 id)
+{
+    // No beginOperation(): this answers a question, it does not change anything, and
+    // marking the window busy for a stat would put a progress bar over a panel.
+    struct stat info;
+    if (::lstat(QFile::encodeName(path).constData(), &info) != 0) {
+        emit failed(id, errorString());
+        return;
+    }
+
+    QVariantMap details;
+    const QFileInfo fileInfo(path);
+    details.insert(QStringLiteral("name"), fileInfo.fileName());
+    details.insert(QStringLiteral("path"), path);
+    details.insert(QStringLiteral("size"), qint64(info.st_size));
+    details.insert(QStringLiteral("mode"), modeString(info.st_mode));
+    details.insert(QStringLiteral("octal"),
+                   QStringLiteral("%1").arg(info.st_mode & 07777, 4, 8, QLatin1Char('0')));
+    details.insert(QStringLiteral("isDir"), bool(S_ISDIR(info.st_mode)));
+    details.insert(QStringLiteral("isLink"), bool(S_ISLNK(info.st_mode)));
+    details.insert(QStringLiteral("executable"), bool(info.st_mode & S_IXUSR));
+    details.insert(QStringLiteral("writable"), bool(info.st_mode & S_IWUSR));
+    details.insert(QStringLiteral("modified"),
+                   QDateTime::fromSecsSinceEpoch(info.st_mtim.tv_sec)
+                       .toString(QStringLiteral("yyyy-MM-dd HH:mm:ss")));
+
+    // Names where the system can supply them, numbers where it cannot — an id with no
+    // passwd entry is still the honest answer.
+    if (const passwd *owner = ::getpwuid(info.st_uid))
+        details.insert(QStringLiteral("owner"), QString::fromLocal8Bit(owner->pw_name));
+    else
+        details.insert(QStringLiteral("owner"), QString::number(info.st_uid));
+    if (const group *grp = ::getgrgid(info.st_gid))
+        details.insert(QStringLiteral("group"), QString::fromLocal8Bit(grp->gr_name));
+    else
+        details.insert(QStringLiteral("group"), QString::number(info.st_gid));
+
+    if (S_ISLNK(info.st_mode)) {
+        QByteArray target(PATH_MAX, Qt::Uninitialized);
+        const ssize_t length = ::readlink(QFile::encodeName(path).constData(),
+                                          target.data(), size_t(target.size()));
+        if (length > 0) {
+            target.resize(int(length));
+            details.insert(QStringLiteral("linkTarget"), QFile::decodeName(target));
+        }
+    }
+
+    emit described(id, details);
+}
+
+// The executable bit follows the read bits: a file the group can read becomes one the
+// group can run, and a private one stays private. Blindly setting 0755 would quietly
+// publish something that was deliberately 0600.
+void FileOps::setExecutable(const QString &path, bool executable, quint64 id)
+{
+    struct stat info;
+    if (::lstat(QFile::encodeName(path).constData(), &info) != 0) {
+        emit failed(id, errorString());
+        return;
+    }
+
+    mode_t mode = info.st_mode & 07777;
+    if (executable) {
+        if (mode & S_IRUSR) mode |= S_IXUSR;
+        if (mode & S_IRGRP) mode |= S_IXGRP;
+        if (mode & S_IROTH) mode |= S_IXOTH;
+    } else {
+        mode &= ~mode_t(S_IXUSR | S_IXGRP | S_IXOTH);
+    }
+
+    if (::chmod(QFile::encodeName(path).constData(), mode) != 0) {
+        emit failed(id, errorString());
+        return;
+    }
+
+    JournalEntry entry;
+    entry.kind = JournalEntry::None; // a mode change is not undoable by the journal
+    entry.summary = executable ? QStringLiteral("%1 is now executable")
+                                     .arg(QFileInfo(path).fileName())
+                               : QStringLiteral("%1 is no longer executable")
+                                     .arg(QFileInfo(path).fileName());
+    emit finished(id, entry);
+}
+
+void FileOps::setWritable(const QString &path, bool writable, quint64 id)
+{
+    struct stat info;
+    if (::lstat(QFile::encodeName(path).constData(), &info) != 0) {
+        emit failed(id, errorString());
+        return;
+    }
+
+    mode_t mode = info.st_mode & 07777;
+    if (writable)
+        mode |= S_IWUSR;
+    else
+        mode &= ~mode_t(S_IWUSR | S_IWGRP | S_IWOTH);
+
+    if (::chmod(QFile::encodeName(path).constData(), mode) != 0) {
+        emit failed(id, errorString());
+        return;
+    }
+
+    JournalEntry entry;
+    entry.kind = JournalEntry::None;
+    entry.summary = writable ? QStringLiteral("%1 is now writable")
+                                   .arg(QFileInfo(path).fileName())
+                             : QStringLiteral("%1 is now read-only")
+                                   .arg(QFileInfo(path).fileName());
+    emit finished(id, entry);
+}
+
+void FileOps::makeSymlink(const QString &targetPath, const QString &destinationDir,
+                          const QString &linkName, quint64 id)
+{
+    beginOperation();
+
+    if (targetPath.isEmpty() || destinationDir.isEmpty() || linkName.isEmpty()) {
+        emit failed(id, QStringLiteral("nothing to link to"));
+        return;
+    }
+
+    QString link = joinPath(destinationDir, linkName);
+    if (QFileInfo::exists(link) || QFileInfo(link).isSymLink())
+        link = joinPath(destinationDir, suggestName(destinationDir, linkName));
+
+    // An absolute target, so the link keeps working when it is moved elsewhere. Copying
+    // a link preserves whatever it already said (see copyTree); creating one has no such
+    // history to respect, and absolute is the answer that surprises least.
+    if (::symlink(QFile::encodeName(targetPath).constData(),
+                  QFile::encodeName(link).constData()) != 0) {
+        emit failed(id, errorString());
+        return;
+    }
+
+    JournalEntry entry;
+    entry.kind = JournalEntry::Created;
+    entry.created.append(link);
+    entry.summary = QStringLiteral("Linked %1").arg(QFileInfo(link).fileName());
     emit finished(id, entry);
 }
 

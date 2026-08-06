@@ -36,6 +36,8 @@ QtObject {
             { label: "Paste", enabled: isDir && Ops.canPaste,
               action: () => Ops.paste(Dir.rowPath(index)) },
             { label: "Copy path", action: () => app.copyPath() },
+            { label: "Create link", action: () => app.linkSelection() },
+            { label: "Properties", action: () => app.showDetails() },
             { label: Places.isBookmarked(Dir.rowPath(index)) ? "Unpin from sidebar"
                                                             : "Pin to sidebar",
               action: () => app.pinSelection() },
@@ -71,6 +73,9 @@ QtObject {
               action: () => app.toggleHidden() },
             { label: "Terminal here", action: () => app.openTerminal() },
             { label: "Refresh", action: () => app.refresh() },
+            { separator: true },
+            // §1 allows undo and this, and nothing more of a trash browser.
+            { label: "Open the trash folder", action: () => app.openTrash() },
         ]
     }
 

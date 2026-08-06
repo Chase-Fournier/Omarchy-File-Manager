@@ -142,6 +142,64 @@ Window {
         overlay.open()
     }
 
+    // ── Properties (Ctrl+I) ──────────────────────────────────────────
+    // Read as a block of text with a couple of verbs under it, rather than a permissions
+    // matrix: the routine question is "is this executable", not "what are the group bits".
+    function showDetails() {
+        const paths = targetPaths()
+        if (paths.length === 0)
+            return
+        Ops.requestDetails(paths[0])
+    }
+
+    function presentDetails(info) {
+        const size = info.isDir ? "" : "\n" + Ops.formatSize(info.size)
+                                     + " (" + info.size + " bytes)"
+        let text = info.name + "\n"
+                 + info.path + size
+                 + "\n" + info.mode + "  " + info.octal
+                 + "\n" + info.owner + ":" + info.group
+                 + "\n" + info.modified
+        if (info.linkTarget !== undefined)
+            text += "\n→ " + info.linkTarget
+
+        overlay.mode = "choice"
+        overlay.secret = false
+        overlay.stacked = true
+        overlay.offerApplyToAll = false
+        overlay.label = text
+        overlay.choices = [
+            { key: "x", label: info.executable ? "Remove the executable bit"
+                                               : "Make executable", value: 0 },
+            { key: "w", label: info.writable ? "Make read-only" : "Make writable", value: 1 },
+            { key: "c", label: "Close", value: -1 },
+        ]
+        overlay.pending = "details"
+        overlay.pendingPath = info.path
+        overlay.pendingExecutable = info.executable
+        overlay.pendingWritable = info.writable
+        overlay.open()
+    }
+
+    // A link to the selection, in the directory being shown.
+    function linkSelection() {
+        const paths = targetPaths()
+        if (paths.length === 0)
+            return
+        for (const path of paths)
+            Ops.linkTo(path, Dir.path)
+    }
+
+    // §1 allows exactly this much of a trash browser: the folder, opened like any other.
+    function openTrash() {
+        const folder = Ops.trashFolder()
+        if (folder.length === 0) {
+            Ops.reportStatus("the trash is empty")
+            return
+        }
+        Dir.navigate(folder)
+    }
+
     function promptNewFile() {
         overlay.mode = "text"
         overlay.label = "New file"
@@ -614,6 +672,11 @@ Window {
     }
 
     Connections {
+        target: Ops
+        function onDetails(info) { root.presentDetails(info) }
+    }
+
+    Connections {
         target: Places
         function onNavigate(location) { Dir.navigate(location) }
         function onStatus(message) { Ops.reportStatus(message) }
@@ -1024,6 +1087,8 @@ Window {
         property var pendingFormats: []
         property var pendingPaths: []
         property string pendingDir: ""
+        property bool pendingExecutable: false
+        property bool pendingWritable: false
         property string pendingPath: ""
 
         onAccepted: function (text) {
@@ -1041,6 +1106,12 @@ Window {
                 Ops.deletePermanently(pendingPaths)
             else if (pending === "connectTerminal" && value === 1)
                 Places.connectInTerminal(pendingHost)
+            else if (pending === "details") {
+                if (value === 0)
+                    Ops.setExecutable(pendingPath, !pendingExecutable)
+                else if (value === 1)
+                    Ops.setWritable(pendingPath, !pendingWritable)
+            }
             else if (pending === "compress" && value >= 0 && value < pendingFormats.length)
                 Ops.compress(pendingPaths, pendingDir, pendingFormats[value].extension)
             else if (pending === "openWith" && value >= 0 && value < pendingApps.length)

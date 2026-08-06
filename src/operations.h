@@ -5,6 +5,7 @@
 
 #include <QObject>
 #include <QVariantList>
+#include <QVariantMap>
 #include <QStringList>
 #include <QThread>
 #include <QTimer>
@@ -65,6 +66,21 @@ public:
     // Whether this looks like something extract() could open, by extension — which is
     // what decides whether the menu entry is offered at all.
     Q_INVOKABLE static bool isArchive(const QString &path);
+
+    // Properties. The answer arrives on `details`, because a stat runs on the worker.
+    Q_INVOKABLE void requestDetails(const QString &path);
+    Q_INVOKABLE void setExecutable(const QString &path, bool executable);
+    Q_INVOKABLE void setWritable(const QString &path, bool writable);
+
+    // A symlink in `destinationDir` pointing at `targetPath`, named "Link to <name>".
+    Q_INVOKABLE void linkTo(const QString &targetPath, const QString &destinationDir);
+
+    // Where the desktop's trash keeps its files, for "open the trash folder". Empty when
+    // it has never been created — nothing has been trashed yet.
+    Q_INVOKABLE static QString trashFolder();
+
+    // The same "3.1 KB" the list shows, so the panel and the row agree.
+    Q_INVOKABLE static QString formatSize(qint64 bytes);
     // Runs a command in the user's terminal. Used for things that are interactive by
     // nature — `rclone config`, editing a dotfile — rather than reimplemented here.
     Q_INVOKABLE void runInTerminal(const QString &command, const QString &workingDir = QString());
@@ -118,6 +134,9 @@ signals:
     // The model listens for this to refresh and to select whatever the operation
     // produced, so a drop or a paste leaves its results selected and ready to act on.
     void completed(const QStringList &selectNames);
+
+    // requestDetails' answer, straight from the worker's stat.
+    void details(const QVariantMap &info);
 
 private slots:
     void onProgress(quint64 id, double fraction, const QString &name);

@@ -51,6 +51,10 @@ private slots:
     void extractingTwiceDoesNotMerge();
     void extractionRefusesToEscapeItsFolder();
 
+    void describesWhatAnEntryIs();
+    void executableBitFollowsTheReadBits();
+    void createsSymlinksThatPointAtTheOriginal();
+
     void journalIsBounded();
     void undoRestoresTrashedFiles();
     void undoReversesAMove();

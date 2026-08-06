@@ -5,6 +5,7 @@
 #include "mounts.h"
 #include "opener.h"
 #include "terminal.h"
+#include "trash.h"
 
 #include <QTimer>
 
@@ -188,6 +189,26 @@ void Places::rebuild()
         place.available = info.exists();
         if (!place.available)
             place.note = QStringLiteral("missing");
+        m_places.append(place);
+    }
+
+    // The trash, under the pins: §1 allows exactly this much of a trash browser — the
+    // folder, opened like any other. It sits here rather than with the volumes because it
+    // is a place you keep things, not a device.
+    //
+    // Always listed, never appearing and disappearing: the directory does not exist until
+    // something has been trashed, and a row that comes and goes cannot be learned. When
+    // it is not there yet it says so instead of failing when clicked.
+    {
+        const QString files = Trash::homeTrashDir() + QStringLiteral("/files");
+        Place place;
+        place.kind = Place::Folder;
+        place.name = QStringLiteral("Trash");
+        place.glyph = QStringLiteral("\uF1F8");
+        place.target = files;
+        place.available = QFileInfo(files).isDir();
+        if (!place.available)
+            place.note = QStringLiteral("empty");
         m_places.append(place);
     }
 

@@ -718,6 +718,113 @@ void TestFileOps::extractionRefusesToEscapeItsFolder()
              "a failed extraction left its folder behind");
 }
 
+// The panel is only as good as what the worker reports.
+void TestFileOps::describesWhatAnEntryIs()
+{
+    write(QStringLiteral("work/thing.txt"), QByteArray(1234, 'a'));
+    const QString target = path(QStringLiteral("work/thing.txt"));
+    QVERIFY(QFile::setPermissions(target, QFileDevice::ReadOwner | QFileDevice::WriteOwner));
+
+    FileOps ops;
+    QVariantMap seen;
+    QObject::connect(&ops, &FileOps::described, &ops,
+                     [&seen](quint64, const QVariantMap &info) { seen = info; });
+    ops.describe(target, 1);
+
+    QCOMPARE(seen.value(QStringLiteral("name")).toString(), QStringLiteral("thing.txt"));
+    QCOMPARE(seen.value(QStringLiteral("size")).toLongLong(), 1234);
+    QCOMPARE(seen.value(QStringLiteral("isDir")).toBool(), false);
+    QCOMPARE(seen.value(QStringLiteral("executable")).toBool(), false);
+    QCOMPARE(seen.value(QStringLiteral("writable")).toBool(), true);
+    // "-rw-------": the form permissions are actually read in.
+    QCOMPARE(seen.value(QStringLiteral("mode")).toString(), QStringLiteral("-rw-------"));
+    QCOMPARE(seen.value(QStringLiteral("octal")).toString(), QStringLiteral("0600"));
+    QVERIFY(!seen.value(QStringLiteral("owner")).toString().isEmpty());
+    QVERIFY(!seen.value(QStringLiteral("modified")).toString().isEmpty());
+
+    // A symlink reports what it points at, and is not confused for its target.
+    QVERIFY(QFile::link(target, path(QStringLiteral("work/link"))));
+    ops.describe(path(QStringLiteral("work/link")), 2);
+    QCOMPARE(seen.value(QStringLiteral("isLink")).toBool(), true);
+    QCOMPARE(seen.value(QStringLiteral("linkTarget")).toString(), target);
+}
+
+// The bit follows the read bits. Setting 0755 outright would take a file its owner had
+// deliberately kept private and publish it to everyone, as a side effect of "make this
+// runnable" — which nobody would expect and nobody would notice.
+void TestFileOps::executableBitFollowsTheReadBits()
+{
+    write(QStringLiteral("work/private.sh"), "#!/bin/sh\n");
+    write(QStringLiteral("work/shared.sh"), "#!/bin/sh\n");
+    const QString priv = path(QStringLiteral("work/private.sh"));
+    const QString shared = path(QStringLiteral("work/shared.sh"));
+
+    QVERIFY(QFile::setPermissions(priv, QFileDevice::ReadOwner | QFileDevice::WriteOwner));
+    QVERIFY(QFile::setPermissions(shared, QFileDevice::ReadOwner | QFileDevice::WriteOwner
+                                          | QFileDevice::ReadGroup | QFileDevice::ReadOther));
+
+    FileOps ops;
+    ops.setExecutable(priv, true, 1);
+    ops.setExecutable(shared, true, 2);
+
+    struct stat privInfo;
+    struct stat sharedInfo;
+    QCOMPARE(::lstat(QFile::encodeName(priv).constData(), &privInfo), 0);
+    QCOMPARE(::lstat(QFile::encodeName(shared).constData(), &sharedInfo), 0);
+
+    // Both gained the owner's x bit...
+    QVERIFY(privInfo.st_mode & S_IXUSR);
+    QVERIFY(sharedInfo.st_mode & S_IXUSR);
+    // ...but the private one stayed private.
+    QVERIFY2(!(privInfo.st_mode & (S_IXGRP | S_IXOTH)),
+             "a 0600 file was made group- or world-executable");
+    QVERIFY2(!(privInfo.st_mode & (S_IRGRP | S_IROTH)),
+             "making a file executable also made it readable by others");
+    // The readable one became runnable by the same people who could read it.
+    QVERIFY(sharedInfo.st_mode & S_IXGRP);
+    QVERIFY(sharedInfo.st_mode & S_IXOTH);
+
+    // And it goes back off again.
+    ops.setExecutable(shared, false, 3);
+    QCOMPARE(::lstat(QFile::encodeName(shared).constData(), &sharedInfo), 0);
+    QVERIFY(!(sharedInfo.st_mode & (S_IXUSR | S_IXGRP | S_IXOTH)));
+}
+
+void TestFileOps::createsSymlinksThatPointAtTheOriginal()
+{
+    write(QStringLiteral("work/original.txt"), "payload");
+    QVERIFY(QDir().mkpath(path(QStringLiteral("work/elsewhere"))));
+
+    QString failure;
+    const JournalEntry entry = runOperation([&](FileOps *ops, quint64 id) {
+        ops->makeSymlink(path(QStringLiteral("work/original.txt")),
+                         path(QStringLiteral("work/elsewhere")),
+                         QStringLiteral("Link to original.txt"), id);
+    }, &failure);
+    QVERIFY2(failure.isEmpty(), qPrintable(failure));
+
+    const QString link = path(QStringLiteral("work/elsewhere/Link to original.txt"));
+    QVERIFY(QFileInfo(link).isSymLink());
+    // Absolute, so moving the link elsewhere does not break it.
+    QCOMPARE(QFileInfo(link).symLinkTarget(), path(QStringLiteral("work/original.txt")));
+    QCOMPARE(readAll(link), QByteArray("payload"));
+
+    // The original is untouched, and undo removes only the link.
+    QCOMPARE(readAll(path(QStringLiteral("work/original.txt"))), QByteArray("payload"));
+    QCOMPARE(entry.kind, JournalEntry::Created);
+    QCOMPARE(entry.created, QStringList { link });
+
+    // A second link beside the first does not clobber it.
+    runOperation([&](FileOps *ops, quint64 id) {
+        ops->makeSymlink(path(QStringLiteral("work/original.txt")),
+                         path(QStringLiteral("work/elsewhere")),
+                         QStringLiteral("Link to original.txt"), id);
+    }, &failure);
+    QVERIFY2(failure.isEmpty(), qPrintable(failure));
+    QVERIFY(QFileInfo(path(QStringLiteral("work/elsewhere/Link to original (2).txt")))
+                .isSymLink());
+}
+
 void TestFileOps::journalIsBounded()
 {
     Journal journal;

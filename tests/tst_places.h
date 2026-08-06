@@ -20,6 +20,8 @@ private slots:
     void pinnedFilesAreNotDrawnAsFolders();
     void unpinningRemovesOnlyThatOne();
     void pinningTwiceIsANoOp();
+    void trashSitsUnderThePins();
+    void trashIsListedBeforeAnythingIsTrashed();
 
 private:
     QString pinsFile() const;

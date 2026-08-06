@@ -391,6 +391,53 @@ empty for the whole operation before jumping to done. `setReadChannel(StandardEr
 the fix. The symptom looked exactly like "progress is not implemented", which is why it
 survived the first screenshot: the overlay was correct and the data never arrived.
 
+### Properties, permissions, links and the trash folder
+
+**The stat runs on the worker, like every other one.** A properties panel is one `lstat`,
+which is nothing locally — and can hang for the length of a timeout on a mount whose
+server has gone away. `FileOps::describe` answers with a `QVariantMap` and the panel
+formats it; §3's rule did not need a third exception.
+
+**`describe` deliberately does not call `beginOperation()`.** Asking what a file *is* does
+not change anything, and marking the window busy would drop a modal progress bar over the
+panel about to show the answer.
+
+**The executable bit follows the read bits.** `chmod 0755` is the obvious implementation
+and it is wrong: it takes a file its owner deliberately kept at `0600` and publishes it to
+everyone, as a side effect of "make this runnable". So `+x` is applied only where `r`
+already is. `executableBitFollowsTheReadBits` pins both halves and was confirmed to fail
+against the naive version.
+
+**No permissions matrix.** Nine checkboxes is a settings screen in disguise (§1). The
+panel offers the two verbs anyone actually reaches for — executable, writable — and
+`chmod` remains the answer for anything finer.
+
+**A created symlink is absolute; a copied one keeps whatever it said.** Those look
+inconsistent until you notice they are different questions: copying has a target to
+respect and rewriting it would break every internal link in the copied tree, while
+creating one has no history and absolute is what survives the link being moved.
+
+**"Open the trash folder" is the whole of §1's trash browser.** It navigates to
+`~/.local/share/Trash/files` like any other directory — the home trash specifically,
+because that is the one the desktop shows, even though a volume trash exists per mount.
+It is both a blank-space menu entry and a sidebar row, sitting under the pins: it is a
+place you keep things, not a device, so it belongs with home and the bookmarks rather than
+down among the mounts.
+
+**The trash row never appears or disappears.** `~/.local/share/Trash/files` does not exist
+until something has been trashed, and the obvious implementation — list it when the
+directory is there — gives a sidebar whose rows move depending on what you did yesterday.
+It is always listed, greyed with "empty" until the directory exists, which is the same
+answer the pins give for a path that has gone. `trashIsListedBeforeAnythingIsTrashed`
+pins both states.
+
+**`--properties` exists so ShowItemProperties can stop lying.** The D-Bus handler used to
+approximate the interface by showing the file and letting the caller work it out; it now
+spawns `omafile --properties <path>`, which is `--select` plus the panel. The flag also
+made the panel testable without synthesising a single keystroke — worth remembering as a
+pattern, since input injection is the least reliable tool in this project and the one that
+can leak into whatever the user is doing.
+
 ### Verbs follow the list that is on screen
 
 **Every verb read `Dir.actionPaths()`, which resolves names against the current

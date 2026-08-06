@@ -1,6 +1,7 @@
 #include "tst_places.h"
 
 #include "places.h"
+#include "trash.h"
 
 #include <QDir>
 #include <QFile>
@@ -165,4 +166,53 @@ void TestPlaces::pinningTwiceIsANoOp()
     QVERIFY(file.open(QIODevice::ReadOnly | QIODevice::Text));
     const QString contents = QString::fromUtf8(file.readAll());
     QCOMPARE(contents.count(folder), 1);
+}
+
+// The trash sits under the pins: a place you keep things, not a device, so it belongs
+// with home and the bookmarks rather than down among the mounts.
+void TestPlaces::trashSitsUnderThePins()
+{
+    const QString folder = m_root.path() + QStringLiteral("/pinned");
+    QVERIFY(QDir().mkpath(folder));
+
+    Places places;
+    places.addBookmark(folder);
+
+    const int pinRow = rowFor(places, folder);
+    const int trashRow = rowFor(places, Trash::homeTrashDir() + QStringLiteral("/files"));
+    QVERIFY2(trashRow >= 0, "the trash is not listed at all");
+    QVERIFY2(trashRow > pinRow, "the trash is above the pins");
+
+    // Everything after it is a mount, a host or a remote — never another pin.
+    for (int row = trashRow + 1; row < places.rowCount(); ++row) {
+        const int kind = places.data(places.index(row, 0), Places::KindRole).toInt();
+        QVERIFY2(kind != int(Place::Bookmark), "a pin was listed below the trash");
+    }
+}
+
+// It is listed whether or not it exists yet — the directory is only created the first
+// time something is trashed, and a row that comes and goes cannot be learned.
+void TestPlaces::trashIsListedBeforeAnythingIsTrashed()
+{
+    const QString files = Trash::homeTrashDir() + QStringLiteral("/files");
+    QDir(files).removeRecursively();
+    QVERIFY(!QFileInfo(files).isDir());
+
+    Places places;
+    int row = rowFor(places, files);
+    QVERIFY2(row >= 0, "the trash vanished when it was empty");
+    QCOMPARE(places.data(places.index(row, 0), Places::NameRole).toString(),
+             QStringLiteral("Trash"));
+    // Greyed with a reason rather than failing when clicked.
+    QCOMPARE(places.data(places.index(row, 0), Places::AvailableRole).toBool(), false);
+    QCOMPARE(places.data(places.index(row, 0), Places::NoteRole).toString(),
+             QStringLiteral("empty"));
+
+    // Once it exists it becomes an ordinary folder to open.
+    QVERIFY(QDir().mkpath(files));
+    places.refresh();
+    row = rowFor(places, files);
+    QVERIFY(row >= 0);
+    QCOMPARE(places.data(places.index(row, 0), Places::AvailableRole).toBool(), true);
+    QVERIFY(places.data(places.index(row, 0), Places::NoteRole).toString().isEmpty());
 }

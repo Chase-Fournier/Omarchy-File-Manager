@@ -98,8 +98,9 @@ check the wiki if yours refuses it.
 ## Use
 
 ```
-omafile [path]           open a directory (default: $PWD)
-omafile --select <file>  open its parent, with it selected
+omafile [path]              open a directory (default: $PWD)
+omafile --select <file>     open its parent, with it selected
+omafile --properties <file> the same, with the properties panel open
 omafile --sidebar        start with the sidebar open   (--no-sidebar to force it closed)
 omafile --preview        start with the preview open   (--no-preview likewise)
 ```
@@ -140,6 +141,7 @@ selected" is to start typing its name. Everything else is modified or an arrow k
 | `Ctrl+Shift+N` | New folder |
 | `Ctrl+T` | Terminal here |
 | `Ctrl+N` | New window |
+| `Ctrl+I` | Properties — mode, owner, exact size, and chmod |
 | `Ctrl+D` | Pin this folder to the sidebar |
 | `Ctrl+S` | Connect to… |
 | `Ctrl+E` | Eject / unmount |
@@ -230,6 +232,31 @@ cancels, and a cancelled archive or extraction is removed rather than left half-
 All of it is libarchive's `bsdtar`, which ships as a dependency of `pacman` itself, so
 there is nothing extra to install. Paths inside the archive are relative to the folder
 they came from, so it unpacks the same way anywhere.
+
+## Properties and permissions
+
+`Ctrl+I`, or **Properties** in the right-click menu, shows what an entry actually is: its
+mode both ways (`-rw-r--r--` and `0644`), owner and group, the exact byte count as well as
+the rounded size, when it changed, and where a symlink points.
+
+Two verbs under it, because those are the ones anyone reaches for: `[x]` toggles the
+executable bit and `[w]` toggles writability. **The executable bit follows the read bits**
+— a file only you can read becomes a file only you can run, and a world-readable one
+becomes world-runnable. It never sets `0755` outright, which would quietly publish
+something you had deliberately kept to yourself.
+
+There is no permissions matrix and there will not be one; that is what `chmod` is for.
+
+## Links and the trash
+
+**Create link** makes a symlink beside the current directory pointing at the selection,
+named `Link to <name>`. The target is absolute, so moving the link does not break it.
+
+**Trash** sits in the sidebar under your pins, and is also in the right-click menu on
+empty space. It browses `~/.local/share/Trash/files` like any other directory, which is as
+much of a trash browser as omafile has — undo is for the operation you just did, this is
+for the one you did yesterday. The row is always there, greyed as "empty" until something
+has actually been thrown away.
 
 ## Configuration
 

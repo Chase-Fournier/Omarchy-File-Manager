@@ -84,10 +84,15 @@ void FileManager1::ShowItems(const QStringList &uris, const QString &)
     }
 }
 
-void FileManager1::ShowItemProperties(const QStringList &uris, const QString &startupId)
+void FileManager1::ShowItemProperties(const QStringList &uris, const QString &)
 {
-    // omafile has no properties dialog and §1 does not want one. Showing the file is a
-    // better answer than doing nothing at all, which would look like a broken menu entry
-    // in the application that asked.
-    ShowItems(uris, startupId);
+    touch();
+
+    // There is a properties panel now, so this can mean what the interface says rather
+    // than approximating it with "here is the file, work it out".
+    const QStringList paths = localPaths(uris);
+    for (const QString &path : paths) {
+        QProcess::startDetached(QCoreApplication::applicationFilePath(),
+                                { QStringLiteral("--properties"), path });
+    }
 }

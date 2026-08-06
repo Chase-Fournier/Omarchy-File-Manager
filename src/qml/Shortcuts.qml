@@ -56,6 +56,7 @@ Item {
 
         { keys: ["Ctrl+B"],           label: "Toggle sidebar",       action: () => app.toggleSidebar() },
         { keys: ["Ctrl+P"],           label: "Toggle preview pane",  action: () => app.togglePreview() },
+        { keys: ["Ctrl+I"],           label: "Properties",           action: () => app.showDetails() },
         { keys: ["Ctrl+D"],           label: "Pin this folder",      action: () => app.pinHere() },
         { keys: ["Ctrl+S"],           label: "Connect to…",          action: () => app.promptConnect() },
         { keys: ["Ctrl+E"],           label: "Eject / unmount",      action: () => app.ejectHere() },

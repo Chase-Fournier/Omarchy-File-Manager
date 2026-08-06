@@ -4,6 +4,7 @@
 
 #include <QMutex>
 #include <QObject>
+#include <QVariantMap>
 #include <QStringList>
 #include <QWaitCondition>
 
@@ -55,6 +56,20 @@ public slots:
     // strew its contents across whatever you were looking at, and that is not undoable
     // by eye. The archive itself is left alone.
     void extract(const QString &archivePath, const QString &destinationDir, quint64 id);
+
+    // What one entry actually is: mode, owner, exact byte count, times, link target.
+    // On the worker like everything else — a single stat is cheap locally and can hang
+    // for the length of a timeout on a mount whose server has gone away.
+    void describe(const QString &path, quint64 id);
+
+    // Set the executable or writable bits, following what the read bits already say so a
+    // group-readable file becomes group-executable and a private one does not.
+    void setExecutable(const QString &path, bool executable, quint64 id);
+    void setWritable(const QString &path, bool writable, quint64 id);
+
+    // A symlink at `destinationDir/linkName` pointing at `targetPath`.
+    void makeSymlink(const QString &targetPath, const QString &destinationDir,
+                     const QString &linkName, quint64 id);
     // §9: the whole edit lands as *one* undoable operation, or none of it does.
     void bulkRename(const QString &directory, const QStringList &originals,
                     const QStringList &edited, quint64 id);
@@ -67,6 +82,8 @@ signals:
     void conflict(quint64 id, const QString &targetPath, const QString &suggestedName);
     void finished(quint64 id, const JournalEntry &journal);
     void failed(quint64 id, const QString &message);
+    // describe()'s answer: a map because the UI only ever formats it into a panel.
+    void described(quint64 id, const QVariantMap &details);
 
 private:
     // Blocks until the GUI answers. Returns Cancel if the operation was cancelled.
