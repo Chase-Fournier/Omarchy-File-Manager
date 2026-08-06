@@ -217,6 +217,10 @@ thing becomes `photos (2).zip` rather than overwriting the first.
 **Nothing is deleted.** An archive is a copy; the originals are exactly where you left
 them. `Ctrl+Z` removes the archive again.
 
+Anything that takes longer than a moment shows a progress bar and holds the window while
+it runs, so you cannot navigate away from a directory that is being written to. `Escape`
+cancels, and a cancelled archive is removed rather than left half-written.
+
 All of it is libarchive's `bsdtar`, which ships as a dependency of `pacman` itself, so
 there is nothing extra to install. Paths inside the archive are relative to the folder
 they came from, so it unpacks the same way anywhere.

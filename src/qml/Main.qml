@@ -22,6 +22,7 @@ Window {
     property int renamingRow: -1
     readonly property bool overlayActive: overlay.visible || Ops.conflictActive
                                           || help.visible || contextMenu.visible
+                                          || progressOverlay.visible
     readonly property int pageStep: Math.max(1, Math.floor(list.height / rowHeight) - 1)
 
     function luma(c) { return 0.299 * c.r + 0.587 * c.g + 0.114 * c.b }
@@ -1000,6 +1001,61 @@ Window {
         onCancelled: {
             if (pending === "password")
                 Places.cancelPassword()
+        }
+    }
+
+    // An operation in flight, shown as a modal bar rather than a hairline in the status
+    // line. §8 already blocks window close while one runs and §4 asks for no spinner under
+    // 300 ms of work; this makes both visible — the window says plainly that it is busy
+    // instead of accepting keystrokes that will be applied to a directory mid-rewrite.
+    Overlay {
+        id: progressOverlay
+
+        app: root
+        mode: "progress"
+        progress: Ops.progress
+        detail: Ops.progressName
+        label: "Working…"
+
+        // Escape cancels the operation itself; the worker checks the flag in its inner
+        // loop and unwinds. The overlay is closed by busy going false, not here, so a
+        // cancel that takes a moment to take effect still reads as busy.
+        onCancelled: Ops.cancel()
+
+        // Under 300 ms of work should show nothing at all (§4) — most operations in this
+        // app finish well inside that, and a dialog that flashes is worse than no dialog.
+        Timer {
+            id: showProgress
+
+            interval: 300
+            onTriggered: {
+                if (Ops.busy && !Ops.conflictActive)
+                    progressOverlay.open()
+            }
+        }
+
+        Connections {
+            target: Ops
+            function onBusyChanged() {
+                if (Ops.busy) {
+                    showProgress.restart()
+                } else {
+                    showProgress.stop()
+                    if (progressOverlay.visible)
+                        progressOverlay.close()
+                }
+            }
+            // A conflict question has to be answerable, so the bar gets out of its way and
+            // comes back when the answer has been given.
+            function onConflictChanged() {
+                if (Ops.conflictActive) {
+                    showProgress.stop()
+                    if (progressOverlay.visible)
+                        progressOverlay.close()
+                } else if (Ops.busy) {
+                    showProgress.restart()
+                }
+            }
         }
     }
 

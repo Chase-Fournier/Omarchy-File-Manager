@@ -335,6 +335,32 @@ a stray right-click cost something. Verified with real clicks in both directions
   once the real size arrives. This is the same layout-timing class of bug as the drag badge
   and the Overlay focus grab — the third instance in this project.
 
+### A running operation is modal now
+
+**§4 asked for "a thin progress line, never a dialog", and this is a deliberate departure**
+— requested, after watching a 50 MB zip run with the window still accepting keystrokes.
+The hairline in the status bar says *that* something is happening; it does not stop you
+navigating away, retyping a filter, or starting a second operation on a directory being
+rewritten underneath you. The bar is now the shared modal `Overlay` in a new `progress`
+mode: a determinate track, the entry being written under it, and Escape to cancel.
+
+**It waits 300 ms before appearing, which is §4's own rule** — no spinner for under 300 ms
+of work. Almost everything in this app finishes well inside that, and a dialog that
+flashes on every paste would be worse than the hairline ever was. The status-bar line is
+kept: it is still the right answer for the fast majority.
+
+**It steps aside for a conflict.** A copy that hits a name collision has to be answerable,
+so `conflictActive` closes the progress overlay and reopens it once the question is
+answered. Two modal scrims stacked on each other would otherwise make the conflict
+unreadable.
+
+**`waitForReadyRead()` watches the wrong channel by default.** It waits on *stdout*, and
+bsdtar writes both its per-entry lines and its errors to *stderr* — so every pass timed
+out at 200 ms, nothing was parsed until the process had already exited, and the bar sat
+empty for the whole operation before jumping to done. `setReadChannel(StandardError)` is
+the fix. The symptom looked exactly like "progress is not implemented", which is why it
+survived the first screenshot: the overlay was correct and the data never arrived.
+
 ### Compressing
 
 **`bsdtar` and nothing else.** libarchive is a dependency of `pacman`, so it is on every

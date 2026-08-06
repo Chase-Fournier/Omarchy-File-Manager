@@ -647,6 +647,11 @@ void FileOps::compress(const QStringList &sources, const QString &destinationDir
     process.setArguments(QStringList{ QStringLiteral("-a"), QStringLiteral("-c"),
                                       QStringLiteral("-v"), QStringLiteral("-f"), target,
                                       QStringLiteral("-C"), parent } + names);
+    // bsdtar writes its per-entry lines *and* its errors to stderr, and waitForReadyRead
+    // watches the current read channel — which defaults to stdout. Left alone, the wait
+    // times out on every pass and nothing is read until the process has already exited,
+    // so the bar sits empty for the whole operation and then jumps to done.
+    process.setReadChannel(QProcess::StandardError);
     process.start();
 
     if (!process.waitForStarted(5000)) {

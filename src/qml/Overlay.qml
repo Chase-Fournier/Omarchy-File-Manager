@@ -9,8 +9,13 @@ FocusScope {
 
     required property var app
 
-    // "text" shows a single input; "choice" shows a row of labelled keys.
+    // "text" shows a single input; "choice" a row of labelled keys; "progress" a bar for
+    // an operation already running, which the window cannot be used during.
     property string mode: "text"
+    // 0..1 for a determinate bar. Negative means "working, length unknown".
+    property real progress: 0
+    // The entry currently being written, under the bar.
+    property string detail: ""
     property string label: ""
     property string initialText: ""
     property var choices: []          // [{ key: "r", label: "Replace", value: 0 }, ...]
@@ -138,13 +143,55 @@ FocusScope {
                 }
             }
 
+            // A determinate bar for an operation in flight. Modal on purpose: the window
+            // cannot be used while it runs, so showing it here rather than as a hairline
+            // in the status bar is what says so.
+            Item {
+                width: parent.width
+                height: overlay.mode === "progress" ? bar.height + detailText.height + 8 : 0
+                visible: overlay.mode === "progress"
+
+                Rectangle {
+                    id: bar
+
+                    width: parent.width
+                    height: 4
+                    radius: 2
+                    color: Theme.bg
+
+                    Rectangle {
+                        // Clamped so a miscounted total cannot draw past the end of the
+                        // track, and floored so the bar is visibly present at zero.
+                        width: parent.width * Math.max(0, Math.min(1, overlay.progress))
+                        height: parent.height
+                        radius: parent.radius
+                        color: Theme.accent
+                    }
+                }
+
+                Text {
+                    id: detailText
+
+                    anchors.top: bar.bottom
+                    anchors.topMargin: 8
+                    width: parent.width
+                    elide: Text.ElideMiddle
+                    text: overlay.detail
+                    color: Theme.dim
+                    font.family: app.monoFamily
+                    font.pixelSize: app.fontSize - 2
+                }
+            }
+
             Item {
                 id: keys
 
                 width: parent.width
                 height: overlay.mode === "choice" ? choiceRow.height : 0
                 visible: overlay.mode === "choice"
-                focus: overlay.mode === "choice"
+                // Also the key handler for "progress", which has no widgets of its own but
+                // still has to hear Escape.
+                focus: overlay.mode !== "text"
 
                 Keys.onPressed: function (event) {
                     if (event.key === Qt.Key_Escape) {
