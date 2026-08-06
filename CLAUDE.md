@@ -1,8 +1,12 @@
 # CLAUDE.md
 
-Working notes for omafile. The spec is [omafile-plan.md](omafile-plan.md) — read it first;
-this file records what is actually built, what was decided along the way, and what still
-needs checking.
+The whole of omafile's documentation that is not the README: what it is meant to be, what
+was decided along the way, and what still needs checking.
+
+The build plan this was written against has been folded in — "Requirements" below is what
+survived of it, keeping its § numbering because the decisions all cite it. Everything the
+plan got wrong, or that was superseded by contact with a real machine, is recorded in
+Decisions rather than left in place.
 
 ## Commands
 
@@ -71,65 +75,196 @@ tests/qml/            the QML suite — a second binary, see below
 
 ---
 
-## Progress
+## Requirements
 
-### M0 — Skeleton ✅
-Repo per §2, qmake6 with `qtquickcompiler`, `Theme`, themed window, startup budget in
-`bin/test`.
+Everything below is a constraint the code is expected to hold to, not a description of it.
+Section numbers are the ones the decisions cite.
 
-### M1 — Browse ✅
-`Lister`, `Watcher`, `DirectoryModel`, `Location`, breadcrumb, status bar, keyboard
-navigation, type-to-filter with match highlighting, Enter/xdg-open, hidden files, sorting,
-`--select`.
+### §1 What it is, and what it is not
 
-### M2 — Act ✅
-Multi-select, copy/cut/paste (Super and Ctrl), drag and drop both directions, XDG trash,
-undo, new folder, inline rename, terminal-here, copy path, conflict resolution, progress
-line. **91 tests pass.**
+One line: open a folder in a blink, find anything by typing, act on it without touching
+the mouse — and drag it out when you want to.
 
-### M3 — Find ✅
-All three tiers of §6: fuzzy in-directory filter, `Ctrl+F` recursive name search over
-`fd` with streaming and a warm cache, `Ctrl+Alt+F` content search over ripgrep with line
-numbers and previews. **134 tests pass.**
+**Non-goals, to be defended rather than revisited:**
 
-### M4a — Remote by mount ✅
-`~/.ssh/config` and `known_hosts` parsing, the sidebar (`Ctrl+B`), sshfs/rclone/gio mount
-lifecycle with cross-window refcounting, `/proc/self/mountinfo` for NFS and removable
-media, `Ctrl+S` connect-to, `Ctrl+D` bookmarks, `Ctrl+E` eject, remote-side search, and
-§10.6's no-trash-on-remote policy. **151 tests pass.**
+- No dual-pane, no miller columns, no tabs. One window, one location; `Ctrl+N` for another.
+- No settings UI. Config is a small file nobody needs to open.
+- No plugins, no scripting API, no extensions.
+- No trash browser beyond undo and "open the trash folder".
+- No protocol implementations beyond what a mount helper already provides — omafile never
+  becomes a network client zoo.
+- No credential storage, no OAuth flows, no "add account" wizards.
+- No file-type-associations editor: that is `xdg-mime`'s job.
 
-### M4b — Native SFTP — deliberately not started
-See "To verify" below: the plan makes it conditional, and its enabling decision (§16.5)
-is unresolved and unmeasurable on this machine.
+### §3 Threading
 
-### M5 — Polish ✅
-Bulk rename in `$EDITOR` (`Ctrl+Shift+R`), the `Ctrl+?` overlay, the preview pane
-(`Ctrl+P`), the freedesktop thumbnail cache, and open-with (`Ctrl+Enter`). Bookmarks
-landed in M4 and the conflict dialog in M2. **182 tests pass.**
+- **The GUI thread does not touch the filesystem** — not even `QFileInfo`. Every stat
+  happens on a worker. Two documented exceptions: `Theme` reads once before first paint,
+  and `QFileSystemWatcher::addPath`, which is why `Watcher` lives on the worker.
+- One thread for listing and watching, one for file operations. Queued signals carry
+  batches, never one item at a time.
+- Every long operation checks a cancel flag in its inner loop. Navigating away or typing
+  another key cancels immediately and the results are *dropped*, not merged.
+- One process per window. No daemon, no IPC, no shared state — which is only viable
+  because startup is cheap, so §12 is what keeps this design honest.
 
-### M6 — Ship ✅ (minus the Omarchy PR, which was descoped)
-`pkgbuild/PKGBUILD` + `bin/install`, a `.desktop` declaring `inode/directory`, an SVG
-icon, `README.md` with the hotkey table and a screenshot, and a GitHub Actions workflow
-that builds, tests and packages on Arch. The package builds and its binary runs from the
-staged tree; `desktop-file-validate` passes with no warnings.
+### §4 How it looks
 
-**Measured against §12:**
+No toolbar, no menu bar, no icon grid: a breadcrumb, a list, a status bar. Nerd Font
+glyphs for file types rather than an icon theme — one colour, one weight, no rainbow.
+Monospace throughout, because it is a list of paths and alignment matters. Row height
+~32 px, generous window padding, no borders between rows. Exactly two uses of the accent
+colour: the selected row, and the search-match highlight. The sidebar is hidden by
+default. Transitions are ≤ 120 ms or absent; no spinner for under 300 ms of work.
+
+### §5 Keyboard
+
+**Bare letter keys type into the filter.** No vim `hjkl` navigation. Filenames are text,
+and the fastest path from "window open" to "file selected" is to start typing the name,
+exactly like the Omarchy launcher. Everything else is modified or an arrow key. This is
+the one deliberate deviation from vim convention; it is written down so it is not
+relitigated.
+
+The binding table itself lives in `src/qml/Shortcuts.qml` and is the single source of
+truth — the `Ctrl+?` overlay and the README table are generated from or mirror it.
+
+### §6 Search, in three tiers
+
+1. **Filter** — bare letters, in-directory, fuzzy, no I/O.
+2. **`Ctrl+F`** — recursive name search from here, streaming, cancellable, warm-cached.
+3. **`Ctrl+Alt+F`** — content search over ripgrep, with line numbers and previews.
+
+Ranking is a pure `(needle, haystack) -> (score, positions)` function with no fzf
+dependency, so it is directly testable. Smart case: an all-lowercase needle matches
+case-insensitively; any uppercase character makes the whole match case-sensitive.
+
+### §7 Drag and drop
+
+Both directions. `Ctrl` forces copy, `Shift` forces move; otherwise move within a
+filesystem and copy across one. The release checklist is manual: drag out to a GTK app, an
+Electron app and a Chromium tab, and drop into omafile from each.
+
+### §8 Operations, trash, undo
+
+Copy, move, delete, mkdir and rename run on the ops thread with progress and conflict
+signals. Conflicts offer Replace / Skip / Rename / Apply-to-all — never per-file
+interrogation. Trash follows the XDG spec so other file managers can restore what omafile
+trashed. Undo is a bounded journal and must never itself be destructive. An operation in
+flight blocks window close rather than being detached: dead simple wins.
+
+### §9 Rename
+
+Inline rename in place, and bulk rename through `$EDITOR`: the selected names are written
+to a file, the editor opens, and the diff is applied on exit. A changed line count aborts
+the whole edit rather than renaming a prefix of it. Swaps and rotations are ordered so no
+file is ever overwritten, and the whole edit is one undo.
+
+### §10 Remote
+
+- **§10.1** — hosts come from `~/.ssh/config`; omafile keeps no host list of its own. The
+  alias is handed to ssh rather than a rebuilt `user@host`, so `ProxyJump`, `IdentityFile`
+  and `Match` keep working. The mount is the remote *root*, not the remote home. Search
+  runs on the far end, which is the single biggest reason to build a remote path at all.
+- **§10.3** — SMB, WebDAV, MTP and cloud are reached by delegating to `gio` and `rclone`
+  mounts, never by implementing a protocol. Missing helpers grey out; they never fail.
+- Mount and forget: a remote is an ordinary path once mounted, so there is no second
+  browsing code path.
+- **§10.6 — what must differ for a remote location**, decided by one `isRemote()` check
+  rather than scattered `if`s: search runs on the far end where possible and is otherwise
+  depth-bounded, never an unbounded crawl; previews and thumbnails are on request only;
+  **delete does not trash**, because there is no dependable remote trash, so it confirms
+  and says "permanent"; nothing blocks the UI on a dead connection.
+- **§10.7 — credentials are never stored.** Keys stay in the agent, share credentials in
+  the portal's keyring via gio, cloud tokens in rclone's own config. A password with no
+  keyring is held in memory for one use and never written or logged.
+
+### §11 Preview and thumbnails
+
+Off by default, `Ctrl+P`, the right 40% of the window. Images decode with
+`QImageReader::setScaledSize` set *before* `read()`, so a 40 MP photo is never fully
+decoded to draw it small. Text is the first 200 lines, monospace, no syntax highlighting.
+Thumbnails follow the freedesktop spec — `~/.cache/thumbnails/{normal,large}`, the MD5 of
+the `file://` URI, a `Thumb::MTime` check — so the cache is shared with the rest of the
+desktop. Generate only for visible rows, and never for a file on a network mount unless
+the preview pane is explicitly open.
+
+### §12 Performance budgets
+
+Tests, not aspirations: `bin/test` fails if they regress.
 
 | Budget | Target | Actual |
 |---|---|---|
-| Cold start to first paint | < 140 ms | **100 ms** median (13 runs) |
+| Cold start to first paint | < 140 ms | **~100 ms** median, settled machine |
 | 10k-entry directory, complete | < 150 ms | **7 ms** |
 | Keystroke → filtered list | < 5 ms | **1 ms** (fuzzy, 10k entries) |
-| First search result (§6) | < 30 ms | **3 ms** |
-| 100k-file tree walked (§6) | < 400 ms | **61 ms** |
-| RSS, idle, one window | < 90 MB | **131 MB** ✗ — see below |
+| First search result | < 30 ms | **3 ms** |
+| 100k-file tree walked | < 400 ms | **61 ms** |
+| RSS, idle, one window | < 90 MB | **131 MB** ✗ — see To verify |
 
-### Right-click menus ✅ (post-M6, requested)
-Three menus, all in `src/qml/ContextMenu.qml`: one for a row, one for blank space, one for
-a sidebar place — the blank-space menu also answers the strip beside the breadcrumb.
-Dismissing passes the click through to whatever it hit. All four surfaces are verified
-with real injected clicks, not just screenshots; `FileOps::makeFile` is covered by
-`tst_fileops::newFileNeverTruncates`. 209 C++ tests and 7 QML tests pass.
+How the startup number is held: QML embedded in resources and precompiled with
+`qtquickcompiler`, nothing imported beyond `QtQuick`, no filesystem work before the window
+is shown, and `Hosts`/`Thumbnails`/`Opener`/search built on first use rather than at
+startup.
+
+Listing fast means `opendir`/`readdir` with **no stat on the first pass** — name and
+`d_type` are enough to draw a row. Size and mtime are filled in by a second pass over the
+visible window plus a buffer.
+
+### §13 Packaging
+
+A PKGBUILD installing `/usr/bin/omafile`, the `.desktop` declaring `inode/directory`, the
+icon and the licence. Soft dependencies are detected once at startup and greyed out rather
+than failing. Don't fight the desktop's conventions anywhere.
+
+### §14 Testing
+
+Everything valuable is headless. The hazards worth naming, because each one has bitten:
+
+- Filenames containing newlines and quotes — the classic breakage for anything that shells
+  out. Search is the only place omafile does, and it uses `--print0`.
+- Permission-denied directories and broken symlinks in a listing.
+- Cross-filesystem copy, symlink handling, and cycle detection in bulk rename.
+- Undo correctness for every operation, including partially failed ones.
+- Mount refcounting across windows, and no orphaned mounts left in `$XDG_RUNTIME_DIR`
+  after an unclean exit.
+- The §12 budgets, asserted against a generated tree.
+
+Manual release checklist, not automated: drag out to a GTK app, an Electron app and a
+Chromium tab; drop in from each; switch themes with a window open; disconnect an sshfs
+mount mid-browse.
+
+### §16 Questions the plan left open
+
+Kept by their original numbers because the decisions cite them. Resolved ones say so.
+
+1. **Quattro theme format** — resolved; see Decisions.
+2. **`fd` versus a built-in walker** — resolved: `fd` with `--print0`.
+3. **Selection semantics** — open. Whether `Space` toggles selection (launcher-like) or
+   extends it (Finder-like) with a filter active. Try both for a week.
+4. **Whether the sidebar should exist at all**, given search and pins — build it, then try
+   deleting it. Built; not yet tried without.
+5. **Native SFTP transport** — open, and the gate on building one at all. `libssh2` vs `libssh` vs
+   `ssh -W` + stdio SFTP. The stdio approach inherits every OpenSSH config feature for
+   near-zero code at the cost of a subprocess per connection; confirm by measuring
+   connection setup on a real tunnel before committing.
+6. **Whether mounted and native SFTP should be user-visible** — leaning toward never
+   mentioning it, with a config override for when the automatic choice is wrong.
+7. **Icon set** — open. Nerd Font glyphs (zero dependencies, matches the terminal) versus
+   the active GTK icon theme. This is also what decides whether the list ever shows
+   thumbnails.
+
+---
+
+## Status
+
+Everything specified above is built and in daily use, except the native SFTP backend,
+which is deliberately not started — §16.5 gates it and the measurement cannot be made
+here. Since then: right-click menus on all four surfaces, pinning files as well as
+folders, breadcrumb drop targets, and the three separate desktop hooks that decide what
+opens a folder (see Decisions).
+
+222 C++ tests and 9 QML tests pass. `bin/test` builds and runs both binaries and holds the
+§12 budgets; CI does the same on Arch and then packages.
 
 ---
 
@@ -386,7 +521,7 @@ the property is "sh sees one argument, unchanged", and only sh can answer that. 
 
 ### QtQuick.Controls was linked but never used
 
-`omafile.pro` carried `quickcontrols2` from the M0 skeleton and `main.cpp` called
+`omafile.pro` carried `quickcontrols2` from the original skeleton and `main.cpp` called
 `QQuickStyle::setStyle("Material")`, while **no QML imports QtQuick.Controls at all** —
 `ContextMenu.qml` was written in plain QtQuick specifically to avoid that cost. Both are
 gone; `libQt6QuickControls2` and `libQt6QuickTemplates2` are no longer load-time
@@ -465,7 +600,7 @@ runs and passes.
 read-only, copy it inside, and run the workflow's steps. Mounting it writable would leave
 root-owned build artefacts in the working tree.
 
-### Theme (M0)
+### Theme
 
 **Quattro theme format — resolves open decision §16.1.** Quattro (v4.0.0.alpha) deleted the
 per-app theme files; a theme is now `colors.toml` + `shell.lock.toml` + a few app files.
@@ -480,7 +615,7 @@ themes and the legacy 3.x ANSI format. If it changes upstream, re-run the sweep 
 `rm -rf current/theme && mv current/next-theme current/theme`, destroying any watch on the
 directory itself.
 
-### Browse (M1)
+### Browsing and the listing model
 
 **`opendir`/`readdir`, not `QDirIterator`.** Qt's iterator stats entries to satisfy its
 filters, and skipping that *is* the §12 listing budget. It is also why filenames with
@@ -529,7 +664,7 @@ created during the initial listing would be missed by inotify forever.
 it to "parent directory" unconditionally. With bare letters typing into the filter,
 correcting a typo would otherwise throw you into the parent.
 
-### Shipping (M6)
+### Packaging
 
 **The PKGBUILD builds from the working tree, not a release tarball.** That is what makes
 `./bin/install` a one-liner while the project is still moving; point `source=` at a tag
@@ -568,7 +703,7 @@ started with an override does *not* write its overridden values back, or a singl
 behaviour back explicitly. omafile never writes to that file — §1 rules out a settings UI,
 and a file the app rewrites is a settings UI with extra steps.
 
-### Polish (M5)
+### Preview, thumbnails, bulk rename and open-with
 
 **Bulk rename plans before it touches anything.** `BulkRename::plan` is pure, so the
 awkward cases are testable without a filesystem: a changed line count aborts the whole
@@ -648,7 +783,7 @@ this: the documentation cannot drift from the bindings, because adding a shortcu
 line to the overlay and removing one removes it. The single binding it cannot show is bare
 letters, which are handled in `Keys.onPressed` and noted in the footer by hand.
 
-### Remote (M4a)
+### Remote
 
 **omafile keeps no host list of its own.** Hosts come from `~/.ssh/config` (following
 `Include`, with a depth limit so a self-including config cannot hang) and from
@@ -765,7 +900,7 @@ hosts still appear in the sidebar carrying "install sshfs to browse", and rclone
 simply do not appear. That is §10.1/§10.3's requirement, and it is the default experience
 of anyone who has not installed the optional tools.
 
-### Find (M3)
+### Search
 
 **The scorer is a pure `(needle, haystack) -> (score, positions)` function** with no fzf
 dependency, so ranking quality is directly testable — §14 calls it the highest-value test
@@ -810,7 +945,7 @@ score and directories keep priority only as a tiebreak. That breaks the watcher'
 merge-walk invariant (which assumes both lists share the sort comparator), so a
 watcher-triggered rebuild resets instead of diffing while a filter is active.
 
-### Act (M2)
+### Operations, clipboard and drag
 
 **Trash is implemented directly against the XDG spec, not delegated to `gio`.** The point
 is two-way interop: Nautilus and gio can restore what omafile trashed, and vice versa.
@@ -868,7 +1003,7 @@ did — can never fire. Binding `Ctrl+Insert`/`Shift+Insert` is what actually im
 why Nautilus can't. Check with `hyprctl binds | grep -A6 'modmask: 64'` before assuming
 any Super binding reaches the app.
 
-**Drag-out was broken four ways at once** (reported from real use, after M2 "shipped"):
+**Drag-out was broken four ways at once** (reported from real use, after drag and drop was called done):
 `Drag.start()` is the *internal*-drag API and never reaches another application —
 `Drag.startDrag()` is the one that creates a platform drag; there was no
 `Drag.imageSource`, so nothing appeared under the cursor; a `DragHandler` sat alongside
@@ -964,7 +1099,7 @@ enough when the QML suite made that two, and the budget sits at 140 with the mea
 number that would actually notice a regression. 160 was tried first, purely to out-wait
 the noise; once the noise had a cause, that was no longer necessary.
 
-The creep is still real — 86 ms at M0, ~100 ms now — and profiling what is constructed
+The creep is still real — 86 ms for the first empty window, ~100 ms now — and profiling what is constructed
 before first paint is still the honest fix. Judge it on a settled machine: the same binary
 reads 100 ms idle and 175 ms under a compile.
 
@@ -989,14 +1124,15 @@ it. The plan says try both for a week.
 **Operation summaries could read better.** "Copied 3 to demo" is terse and does not name
 the files when there is only one.
 
-**M4b (native SFTP) is not built, deliberately.** §15 says to "ship M4a first and live on
-it — M4b is worth building only once you've felt where sshfs is actually too slow", and
-§16.5 leaves the enabling decision open pending a measurement: `libssh2` vs `libssh` vs
+**Native SFTP is not built, deliberately.** The plan's own advice was to ship the
+mount-based path first and live on it — a native backend is worth building only once you
+have felt where sshfs is actually too slow — and §16.5 leaves the enabling decision open
+pending a measurement: `libssh2` vs `libssh` vs
 `ssh -W` + stdio SFTP, "confirm by measuring connection setup time on a real tunnel before
 committing". That measurement cannot be made here — there is no sshfs, no test host, and
 §14 wants the backend tested against a real sshd in a container. Building it now would be
 speculative work against an unresolved decision. It needs a real remote box and a week of
-using M4a first.
+living on the mount-based path first.
 
 **~~The sidebar has never been seen.~~ It has now** — captured while screenshotting the
 context menus: home, Downloads, Documents, Pictures, then the SSH hosts and remotes, all
@@ -1033,7 +1169,7 @@ really §16.7's open question; the machinery is ready either way.
 **Open-with has not been driven by hand.** The parsing is tested, but the chooser overlay
 has never been opened against a real MIME type.
 
-**Startup has crept: 86 ms at M0, ~104 ms now** — see the budget note above. The
+**Startup has crept: 86 ms for the first empty window, ~100 ms now** — see the budget note above. The
 measurement is extremely sensitive to machine load: the same binary measures 95 ms idle
 and 167 ms immediately after a `makepkg` run. Judge it only on a settled machine, and take
 the median of a dozen samples, not three.
@@ -1053,7 +1189,7 @@ opened paths yet.
 **`plocate` whole-filesystem search is written but untested** — the `/`-prefixed query
 path has no coverage and plocate is not installed here.
 
-**Sort bindings are not in the plan's §5 table.** Either add `Ctrl+1/2/3` to it or pick
+**Sort bindings were never in §5's table.** Either add `Ctrl+1/2/3` to it or pick
 different keys.
 
 ---
