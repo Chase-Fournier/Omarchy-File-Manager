@@ -112,7 +112,7 @@ Window {
     // Compress the selection into an archive beside it. The originals stay: this makes a
     // copy, and a file manager that quietly ate the input would be a bad surprise.
     function compressSelection() {
-        const paths = Dir.actionPaths()
+        const paths = targetPaths()
         if (paths.length === 0)
             return
 
@@ -137,6 +137,8 @@ Window {
         overlay.pending = "compress"
         overlay.pendingFormats = formats
         overlay.pendingPaths = paths
+        // Beside the file, not beside whatever directory happens to be displayed.
+        overlay.pendingDir = targetDir()
         overlay.open()
     }
 
@@ -154,7 +156,7 @@ Window {
 
     // Ctrl+Enter: pick the application rather than accepting xdg-open's default (§5).
     function openWith() {
-        const paths = Dir.actionPaths()
+        const paths = targetPaths()
         if (paths.length === 0)
             return
         const apps = Ops.handlersFor(paths[0])
@@ -178,7 +180,13 @@ Window {
         overlay.pendingPath = paths[0]
         overlay.open()
     }
-    function bulkRename() { Ops.bulkRename(Dir.path, Dir.actionNames()) }
+    function bulkRename() {
+        if (Find.active) {
+            Ops.reportStatus("bulk rename works on a folder, not on search results")
+            return
+        }
+        Ops.bulkRename(Dir.path, Dir.actionNames())
+    }
 
     // ── Places and remote (§10) ──────────────────────────────────────
     // Both remembered across sessions; see Settings for the precedence rules.
@@ -198,7 +206,7 @@ Window {
     // only ever mean the current directory. A mixed selection follows whichever way the
     // first one goes, so the entry's label is never a lie about what it will do.
     function pinSelection() {
-        const paths = Dir.actionPaths()
+        const paths = targetPaths()
         if (paths.length === 0)
             return
 
@@ -238,7 +246,7 @@ Window {
     // §10.6: no dependable trash on a network mount, so Delete there is the permanent
     // one — asked for explicitly instead of silently doing something different.
     function trashOrConfirm() {
-        const paths = Dir.actionPaths()
+        const paths = targetPaths()
         if (paths.length > 0 && Ops.isRemote(paths[0]))
             confirmDelete()
         else
@@ -291,11 +299,37 @@ Window {
         Dir.selectByName(target.substring(target.lastIndexOf("/") + 1))
     }
 
-    function copy() { Ops.copyToClipboard(Dir.actionPaths()) }
-    function cut() { Ops.cut(Dir.actionPaths()) }
+    // ── What a verb acts on ──────────────────────────────────────────
+    //
+    // With a search open, the list is showing hits from anywhere under here while the
+    // directory model's cursor is still sitting wherever it was left — so asking `Dir`
+    // for the answer means acting on a file that is not on screen. Every verb goes
+    // through this instead, and it follows whichever list is actually in front of you.
+    //
+    // A search hit is a single path: the results have a cursor but no multi-selection,
+    // and inventing one here would be a different feature.
+    function targetPaths() {
+        if (Find.active) {
+            const hit = Find.currentIndex >= 0 ? Find.rowPath(Find.currentIndex) : ""
+            return hit.length > 0 ? [hit] : []
+        }
+        return Dir.actionPaths()
+    }
+
+    // Where a new file belongs: beside the thing being acted on, which during a search is
+    // not the directory being displayed.
+    function targetDir() {
+        const paths = targetPaths()
+        if (Find.active && paths.length > 0)
+            return paths[0].substring(0, paths[0].lastIndexOf("/"))
+        return Dir.path
+    }
+
+    function copy() { Ops.copyToClipboard(targetPaths()) }
+    function cut() { Ops.cut(targetPaths()) }
     function paste() { Ops.paste(Dir.path) }
-    function copyPath() { Ops.copyPathToClipboard(Dir.actionPaths()) }
-    function trash() { Ops.trash(Dir.actionPaths()) }
+    function copyPath() { Ops.copyPathToClipboard(targetPaths()) }
+    function trash() { Ops.trash(targetPaths()) }
 
     // What a drag carries: the whole selection when the dragged row is part of it,
     // otherwise just that row (§7).
@@ -432,6 +466,10 @@ Window {
     // ── Rename (§9) ──────────────────────────────────────────────────
 
     function beginRename() {
+        if (Find.active) {
+            Ops.reportStatus("open the folder it is in to rename it")
+            return
+        }
         if (Dir.currentIndex >= 0)
             renamingRow = Dir.currentIndex
     }
@@ -460,9 +498,12 @@ Window {
     }
 
     function confirmDelete() {
-        const paths = Dir.actionPaths()
+        const paths = targetPaths()
         if (paths.length === 0)
             return
+        // Captured now: the confirmation is answered later, and re-deriving the list at
+        // that point would delete whatever the cursor had moved on to.
+        overlay.pendingPaths = paths
         overlay.mode = "choice"
         overlay.label = "Delete " + paths.length + " item" + (paths.length === 1 ? "" : "s")
                       + " permanently? This cannot be undone."
@@ -800,7 +841,10 @@ Window {
                             list.lastScrolledTo = Dir.currentIndex
                             list.positionViewAtIndex(Dir.currentIndex, ListView.Contain)
                         }
-                        Preview.show(Dir.currentIndex >= 0 ? Dir.rowPath(Dir.currentIndex) : "")
+                        // Only when this list is the one on screen: during a search the
+                        // preview belongs to the hit, and Find's handler below owns it.
+                        if (!Find.active)
+                            Preview.show(Dir.currentIndex >= 0 ? Dir.rowPath(Dir.currentIndex) : "")
                     }
                 }
 
@@ -809,6 +853,9 @@ Window {
                     function onCurrentIndexChanged() {
                         if (Find.active && Find.currentIndex >= 0)
                             list.positionViewAtIndex(Find.currentIndex, ListView.Contain)
+                        if (Find.active)
+                            Preview.show(Find.currentIndex >= 0
+                                         ? Find.rowPath(Find.currentIndex) : "")
                     }
                 }
 
@@ -976,6 +1023,7 @@ Window {
         property var pendingApps: []
         property var pendingFormats: []
         property var pendingPaths: []
+        property string pendingDir: ""
         property string pendingPath: ""
 
         onAccepted: function (text) {
@@ -990,11 +1038,11 @@ Window {
         }
         onChose: function (value) {
             if (pending === "delete" && value === 1)
-                Ops.deletePermanently(Dir.actionPaths())
+                Ops.deletePermanently(pendingPaths)
             else if (pending === "connectTerminal" && value === 1)
                 Places.connectInTerminal(pendingHost)
             else if (pending === "compress" && value >= 0 && value < pendingFormats.length)
-                Ops.compress(pendingPaths, Dir.path, pendingFormats[value].extension)
+                Ops.compress(pendingPaths, pendingDir, pendingFormats[value].extension)
             else if (pending === "openWith" && value >= 0 && value < pendingApps.length)
                 Ops.openWith(pendingApps[value].desktopFile, pendingPath)
         }

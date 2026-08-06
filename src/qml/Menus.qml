@@ -63,7 +63,9 @@ QtObject {
             { label: "New folder", action: () => app.promptNewFolder() },
             { separator: true },
             { label: "Paste", enabled: Ops.canPaste, action: () => app.paste() },
-            { label: "Select all", action: () => Dir.selectAll() },
+            // Selecting rows of a list that is not on screen: while a search is open the
+            // directory's own selection is invisible and acts on nothing.
+            { label: "Select all", enabled: !Find.active, action: () => Dir.selectAll() },
             { separator: true },
             { label: Dir.showHidden ? "Hide hidden files" : "Show hidden files",
               action: () => app.toggleHidden() },

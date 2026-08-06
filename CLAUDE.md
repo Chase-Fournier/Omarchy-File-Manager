@@ -391,6 +391,43 @@ empty for the whole operation before jumping to done. `setReadChannel(StandardEr
 the fix. The symptom looked exactly like "progress is not implemented", which is why it
 survived the first screenshot: the overlay was correct and the data never arrived.
 
+### Verbs follow the list that is on screen
+
+**Every verb read `Dir.actionPaths()`, which resolves names against the current
+directory** — so with a search open, where the list shows hits from anywhere underneath,
+they acted on whatever the directory model's cursor happened to be pointing at. `Ctrl+F`
+clears the filter but never reset that cursor, and no shortcut was gated on `Find.active`.
+
+The mismatch was visible without touching anything: with a hit highlighted, the **preview
+pane showed a different file's contents** — because it, too, followed `Dir`.
+
+`targetPaths()` is now the single answer to "what does this verb act on", and it follows
+whichever list is in front of you. `copy`, `cut`, `copyPath`, `trash`, `trashOrConfirm`,
+`confirmDelete`, `openWith`, `pinSelection` and `compressSelection` all go through it, and
+the preview follows the search cursor while one is open. `dragPaths` deliberately does
+not: dragging is from the directory list, and search rows are not drag sources.
+
+**A search hit is one path.** The results have a cursor but no multi-selection; inventing
+one here would be a different feature, so `targetPaths()` returns a single-element list.
+
+**What cannot work on a hit says so.** Inline rename is bound to the entry delegate and
+bulk rename takes a folder, so both refuse with a message rather than renaming something
+in the directory behind the search. "Select all" is greyed out for the same reason: it
+would build a selection in a list nobody is looking at.
+
+**The confirmation captures its paths.** `confirmDelete` stores what it asked about
+instead of re-deriving on answer — otherwise moving the cursor between question and answer
+deletes something else.
+
+**Unverified end to end, and the reason is worth recording.** The behaviour could not be
+demonstrated through `hyprctl dispatch sendshortcut`: it dropped Delete entirely and lost
+most other keys, so every attempt was inconclusive rather than failing. A uinput
+*keyboard* was built to replace it (`keyd.c`, the same trick as the click injector) and it
+does deliver keys reliably — but the desktop it types into is the one the user is working
+on, and focus moved to their editor mid-run, which sent a `Ctrl+F` and three keystrokes
+into VS Code. Injecting input is only safe on an idle machine. The fix rests on reading,
+the build and 246 tests; the demonstration is owed.
+
 ### Compressing
 
 **`bsdtar` and nothing else.** libarchive is a dependency of `pacman`, so it is on every
