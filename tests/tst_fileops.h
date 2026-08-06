@@ -41,6 +41,11 @@ private slots:
     void newFolderRefusesToClobber();
     void newFileNeverTruncates();
 
+    void compressingLeavesTheOriginalsAlone();
+    void compressedArchiveRoundTrips();
+    void compressingTwiceDoesNotClobber();
+    void failedCompressionLeavesNothingBehind();
+
     void journalIsBounded();
     void undoRestoresTrashedFiles();
     void undoReversesAMove();

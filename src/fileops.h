@@ -42,6 +42,13 @@ public slots:
     void makeDirectory(const QString &parentDir, const QString &name, quint64 id);
     void makeFile(const QString &parentDir, const QString &name, quint64 id);
     void renameEntry(const QString &path, const QString &newName, quint64 id);
+
+    // Pack `sources` into `destinationDir/archiveName`. The extension chooses the format,
+    // because that is what libarchive's -a does and inventing a second way to say it
+    // would only be a way to disagree with the filename. Nothing is deleted: an archive
+    // is a copy, and the originals are still there afterwards.
+    void compress(const QStringList &sources, const QString &destinationDir,
+                  const QString &archiveName, quint64 id);
     // §9: the whole edit lands as *one* undoable operation, or none of it does.
     void bulkRename(const QString &directory, const QStringList &originals,
                     const QStringList &edited, quint64 id);

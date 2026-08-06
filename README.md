@@ -207,6 +207,20 @@ when you exit. Regex rename, sequential numbering, case changes and sorting come
 with no UI at all. If the line count changed, nothing is renamed. Swaps and rotations are
 ordered so no file is ever overwritten.
 
+## Compressing
+
+Right-click a selection and choose **Compress…**, then a format: zip, tar+gzip, tar+zstd,
+tar+xz or 7z. The archive lands beside what it was made from, named after it — one item
+gives `photos.zip`, several give the folder's own name — and a second archive of the same
+thing becomes `photos (2).zip` rather than overwriting the first.
+
+**Nothing is deleted.** An archive is a copy; the originals are exactly where you left
+them. `Ctrl+Z` removes the archive again.
+
+All of it is libarchive's `bsdtar`, which ships as a dependency of `pacman` itself, so
+there is nothing extra to install. Paths inside the archive are relative to the folder
+they came from, so it unpacks the same way anywhere.
+
 ## Configuration
 
 There is no settings UI, and there will not be one. There is a small file:

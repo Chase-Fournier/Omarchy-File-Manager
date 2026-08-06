@@ -39,6 +39,7 @@ QtObject {
             { label: Places.isBookmarked(Dir.rowPath(index)) ? "Unpin from sidebar"
                                                             : "Pin to sidebar",
               action: () => app.pinSelection() },
+            { label: "Compress…", action: () => app.compressSelection() },
             { separator: true },
             { label: "Rename", action: () => app.beginRename() },
             { label: "Bulk rename in $EDITOR", action: () => app.bulkRename() },

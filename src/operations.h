@@ -51,6 +51,14 @@ public:
     Q_INVOKABLE void deletePermanently(const QStringList &paths);
     Q_INVOKABLE void newFolder(const QString &parentDir, const QString &name);
     Q_INVOKABLE void newFile(const QString &parentDir, const QString &name);
+
+    // Pack the given paths into an archive beside them. `extension` picks the format
+    // (".zip", ".tar.gz", …). The originals are left exactly where they are — an archive
+    // is a copy, not a move.
+    Q_INVOKABLE void compress(const QStringList &paths, const QString &destinationDir,
+                              const QString &extension);
+    // The formats libarchive can write here, as { name, extension } for the chooser.
+    Q_INVOKABLE static QVariantList archiveFormats();
     // Runs a command in the user's terminal. Used for things that are interactive by
     // nature — `rclone config`, editing a dotfile — rather than reimplemented here.
     Q_INVOKABLE void runInTerminal(const QString &command, const QString &workingDir = QString());

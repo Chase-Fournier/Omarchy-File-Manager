@@ -8,6 +8,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QProcess>
 #include <QSignalSpy>
 #include <QTest>
 
@@ -503,6 +504,101 @@ void TestFileOps::newFileNeverTruncates()
     QCOMPARE(entry.kind, JournalEntry::Created);
     // Undo has to know what to remove, or the menu creates litter nothing can clear.
     QCOMPARE(entry.created, QStringList({ path(QStringLiteral("work/blank.txt")) }));
+}
+
+// Compressing is a copy, not a move: the requirement is that what went in is still there
+// afterwards. A file manager that quietly ate its input would be a very bad surprise.
+void TestFileOps::compressingLeavesTheOriginalsAlone()
+{
+    write(QStringLiteral("work/pack/one.txt"), "first");
+    write(QStringLiteral("work/pack/deep/two.txt"), "second");
+
+    QString failure;
+    const JournalEntry entry = runOperation([&](FileOps *ops, quint64 id) {
+        ops->compress({ path(QStringLiteral("work/pack")) }, path(QStringLiteral("work")),
+                      QStringLiteral("pack.zip"), id);
+    }, &failure);
+    QVERIFY2(failure.isEmpty(), qPrintable(failure));
+
+    // The archive exists...
+    const QString archive = path(QStringLiteral("work/pack.zip"));
+    QVERIFY2(QFileInfo::exists(archive), "no archive was written");
+    QVERIFY(QFileInfo(archive).size() > 0);
+
+    // ...and every input is exactly where it was, with its contents intact.
+    QCOMPARE(readAll(path(QStringLiteral("work/pack/one.txt"))), QByteArray("first"));
+    QCOMPARE(readAll(path(QStringLiteral("work/pack/deep/two.txt"))), QByteArray("second"));
+
+    // Undo removes what it made, and only that.
+    QCOMPARE(entry.kind, JournalEntry::Created);
+    QCOMPARE(entry.created, QStringList { archive });
+}
+
+// The proof that it is a real archive is reading it back, not that a file appeared.
+void TestFileOps::compressedArchiveRoundTrips()
+{
+    write(QStringLiteral("work/tree/a.txt"), "alpha");
+    write(QStringLiteral("work/tree/nested/b.txt"), "beta");
+
+    QString failure;
+    runOperation([&](FileOps *ops, quint64 id) {
+        ops->compress({ path(QStringLiteral("work/tree")) }, path(QStringLiteral("work")),
+                      QStringLiteral("tree.tar.gz"), id);
+    }, &failure);
+    QVERIFY2(failure.isEmpty(), qPrintable(failure));
+
+    QVERIFY(QDir().mkpath(path(QStringLiteral("work/out"))));
+    QProcess extract;
+    extract.start(QStringLiteral("bsdtar"),
+                  { QStringLiteral("-x"), QStringLiteral("-f"),
+                    path(QStringLiteral("work/tree.tar.gz")),
+                    QStringLiteral("-C"), path(QStringLiteral("work/out")) });
+    QVERIFY(extract.waitForFinished(20000));
+    QCOMPARE(extract.exitCode(), 0);
+
+    // Paths inside are relative to the folder that was packed, not absolute paths from
+    // this machine — which is what -C buys and what makes the archive portable.
+    QCOMPARE(readAll(path(QStringLiteral("work/out/tree/a.txt"))), QByteArray("alpha"));
+    QCOMPARE(readAll(path(QStringLiteral("work/out/tree/nested/b.txt"))), QByteArray("beta"));
+}
+
+// Two archives of the same folder must not overwrite each other, the same way two copies
+// of a file do not.
+void TestFileOps::compressingTwiceDoesNotClobber()
+{
+    write(QStringLiteral("work/thing/x.txt"), "x");
+
+    QString failure;
+    runOperation([&](FileOps *ops, quint64 id) {
+        ops->compress({ path(QStringLiteral("work/thing")) }, path(QStringLiteral("work")),
+                      QStringLiteral("thing.zip"), id);
+    }, &failure);
+    QVERIFY2(failure.isEmpty(), qPrintable(failure));
+
+    const JournalEntry second = runOperation([&](FileOps *ops, quint64 id) {
+        ops->compress({ path(QStringLiteral("work/thing")) }, path(QStringLiteral("work")),
+                      QStringLiteral("thing.zip"), id);
+    }, &failure);
+    QVERIFY2(failure.isEmpty(), qPrintable(failure));
+
+    QVERIFY(QFileInfo::exists(path(QStringLiteral("work/thing.zip"))));
+    QVERIFY2(QFileInfo::exists(path(QStringLiteral("work/thing (2).zip"))),
+             "the second archive overwrote the first");
+    QCOMPARE(second.created, QStringList { path(QStringLiteral("work/thing (2).zip")) });
+}
+
+// A failure must not leave a half-written archive sitting there looking usable.
+void TestFileOps::failedCompressionLeavesNothingBehind()
+{
+    QString failure;
+    runOperation([&](FileOps *ops, quint64 id) {
+        ops->compress({ path(QStringLiteral("work/does-not-exist")) },
+                      path(QStringLiteral("work")), QStringLiteral("ghost.zip"), id);
+    }, &failure);
+
+    QVERIFY2(!failure.isEmpty(), "compressing a missing path should fail");
+    QVERIFY2(!QFileInfo::exists(path(QStringLiteral("work/ghost.zip"))),
+             "a failed compression left an archive behind");
 }
 
 void TestFileOps::journalIsBounded()

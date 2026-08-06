@@ -335,6 +335,31 @@ a stray right-click cost something. Verified with real clicks in both directions
   once the real size arrives. This is the same layout-timing class of bug as the drag badge
   and the Overlay focus grab — the third instance in this project.
 
+### Compressing
+
+**`bsdtar` and nothing else.** libarchive is a dependency of `pacman`, so it is on every
+Arch machine — which means zip, tar+gzip, tar+zstd, tar+xz and 7z all arrive with no new
+dependency and no second code path. `-a` picks the format from the extension the caller
+asked for, so the filename and the format cannot disagree; `-C <parent> <names>` keeps the
+paths inside relative, which is what makes the archive unpack the same way anywhere
+instead of carrying this machine's absolute paths.
+
+**Nothing is deleted, which is the whole requirement.** An archive is a copy. Undo removes
+the archive, and `compressingLeavesTheOriginalsAlone` asserts the inputs are still there
+with their contents — it would fail on any future "compress and clean up" shortcut.
+
+**`suggestName` always steps to "(2)"; it is not a name generator.** Calling it up front
+put the very first archive at `pack (2).zip` and left `pack.zip` missing. It exists to
+resolve a collision, so it is only reached when the plain name is taken. The test caught
+this immediately, which is the argument for asserting on the file that appears rather than
+on the absence of an error.
+
+**Progress is real, not a spinner.** `bsdtar -v` prints one `a <path>` line per entry on
+*stderr*, so counting entries first and matching those lines gives a genuine bar. A
+cancelled compression kills the process and deletes the partial archive: a half-written
+zip that looks finished is worse than no zip at all, and the same goes for a failure —
+`failedCompressionLeavesNothingBehind` pins that.
+
 ### "Reveal in File Explorer" is not xdg-open
 
 **`org.freedesktop.FileManager1` is a third way of asking for a file manager**, and omafile

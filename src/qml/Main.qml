@@ -108,6 +108,37 @@ Window {
         contextMenu.openAt(x, y, menus.forPlace(index, kind, name, target, mounted, ejectable))
     }
 
+    // Compress the selection into an archive beside it. The originals stay: this makes a
+    // copy, and a file manager that quietly ate the input would be a bad surprise.
+    function compressSelection() {
+        const paths = Dir.actionPaths()
+        if (paths.length === 0)
+            return
+
+        const formats = Ops.archiveFormats()
+        if (formats.length === 0) {
+            Ops.reportStatus("install libarchive to make archives")
+            return
+        }
+
+        // Letters rather than arrow keys, like every other choice in the app.
+        const letters = "asdfghjkl"
+        overlay.mode = "choice"
+        overlay.secret = false
+        overlay.stacked = false
+        overlay.offerApplyToAll = false
+        overlay.label = paths.length === 1
+            ? "Compress \"" + paths[0].split("/").pop() + "\" as"
+            : "Compress " + paths.length + " items as"
+        overlay.choices = formats.slice(0, letters.length).map(function (format, i) {
+            return { key: letters[i], label: format.name, value: i }
+        })
+        overlay.pending = "compress"
+        overlay.pendingFormats = formats
+        overlay.pendingPaths = paths
+        overlay.open()
+    }
+
     function promptNewFile() {
         overlay.mode = "text"
         overlay.label = "New file"
@@ -942,6 +973,8 @@ Window {
         property string pending: ""
         property string pendingHost: ""
         property var pendingApps: []
+        property var pendingFormats: []
+        property var pendingPaths: []
         property string pendingPath: ""
 
         onAccepted: function (text) {
@@ -959,6 +992,8 @@ Window {
                 Ops.deletePermanently(Dir.actionPaths())
             else if (pending === "connectTerminal" && value === 1)
                 Places.connectInTerminal(pendingHost)
+            else if (pending === "compress" && value >= 0 && value < pendingFormats.length)
+                Ops.compress(pendingPaths, Dir.path, pendingFormats[value].extension)
             else if (pending === "openWith" && value >= 0 && value < pendingApps.length)
                 Ops.openWith(pendingApps[value].desktopFile, pendingPath)
         }

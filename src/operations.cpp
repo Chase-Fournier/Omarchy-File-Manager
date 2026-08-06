@@ -217,6 +217,52 @@ void Operations::newFile(const QString &parentDir, const QString &name)
                               Q_ARG(quint64, operation));
 }
 
+QVariantList Operations::archiveFormats()
+{
+    // All of these are libarchive's, which ships with bsdtar — a dependency of pacman
+    // itself, so on Arch this list is never empty and never needs graying out.
+    static const QList<QPair<QString, QString>> formats = {
+        { QStringLiteral("Zip"),      QStringLiteral(".zip") },
+        { QStringLiteral("Tar + gzip"), QStringLiteral(".tar.gz") },
+        { QStringLiteral("Tar + zstd"), QStringLiteral(".tar.zst") },
+        { QStringLiteral("Tar + xz"),   QStringLiteral(".tar.xz") },
+        { QStringLiteral("7z"),        QStringLiteral(".7z") },
+    };
+
+    QVariantList out;
+    if (QStandardPaths::findExecutable(QStringLiteral("bsdtar")).isEmpty())
+        return out;
+    for (const auto &format : formats) {
+        out.append(QVariantMap { { QStringLiteral("name"), format.first },
+                                 { QStringLiteral("extension"), format.second } });
+    }
+    return out;
+}
+
+void Operations::compress(const QStringList &paths, const QString &destinationDir,
+                          const QString &extension)
+{
+    if (paths.isEmpty() || destinationDir.isEmpty() || extension.isEmpty())
+        return;
+
+    // One item names the archive after itself; several name it after the folder they are
+    // in, which is the only thing they have in common. "Archive" is the last resort, for
+    // a selection sitting in the filesystem root.
+    QString stem;
+    if (paths.size() == 1) {
+        stem = QFileInfo(paths.first()).fileName();
+    } else {
+        stem = QFileInfo(destinationDir).fileName();
+        if (stem.isEmpty())
+            stem = QStringLiteral("Archive");
+    }
+
+    const quint64 operation = begin();
+    QMetaObject::invokeMethod(m_ops, "compress", Qt::QueuedConnection,
+                              Q_ARG(QStringList, paths), Q_ARG(QString, destinationDir),
+                              Q_ARG(QString, stem + extension), Q_ARG(quint64, operation));
+}
+
 void Operations::runInTerminal(const QString &command, const QString &workingDir)
 {
     if (!Terminal::runHeld(command, workingDir))

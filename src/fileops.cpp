@@ -6,6 +6,8 @@
 #include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
+#include <QStandardPaths>
+#include <QProcess>
 
 #include <cerrno>
 #include <cstring>
@@ -576,6 +578,134 @@ void FileOps::makeFile(const QString &parentDir, const QString &name, quint64 id
     entry.kind = JournalEntry::Created;
     entry.created.append(target);
     entry.summary = QStringLiteral("Created %1").arg(name);
+    emit finished(id, entry);
+}
+
+// Counting entries up front is what turns an indeterminate spinner into a real progress
+// bar: bsdtar prints one "a <path>" line per entry it writes, so the two can be matched.
+static int countEntries(const QString &path)
+{
+    const QFileInfo info(path);
+    if (!info.isDir() || info.isSymLink())
+        return 1;
+
+    int total = 1; // the directory itself is an entry in the archive
+    QDirIterator iterator(path, QDir::AllEntries | QDir::Hidden | QDir::System
+                                    | QDir::NoDotAndDotDot,
+                          QDirIterator::Subdirectories);
+    while (iterator.hasNext()) {
+        iterator.next();
+        ++total;
+    }
+    return total;
+}
+
+void FileOps::compress(const QStringList &sources, const QString &destinationDir,
+                       const QString &archiveName, quint64 id)
+{
+    beginOperation();
+
+    if (sources.isEmpty() || destinationDir.isEmpty() || archiveName.isEmpty()) {
+        emit failed(id, QStringLiteral("nothing to compress"));
+        return;
+    }
+
+    // libarchive, which is a dependency of pacman itself, so this is not a soft dependency
+    // on Arch — but say so rather than failing silently if it is somehow missing.
+    const QString program = QStandardPaths::findExecutable(QStringLiteral("bsdtar"));
+    if (program.isEmpty()) {
+        emit failed(id, QStringLiteral("bsdtar is not installed (libarchive)"));
+        return;
+    }
+
+    // Everything comes from one listing, so one -C covers the lot and the archive holds
+    // relative names rather than the absolute paths of this machine.
+    const QString parent = QFileInfo(sources.first()).absolutePath();
+    QStringList names;
+    for (const QString &source : sources) {
+        const QFileInfo info(source);
+        if (info.absolutePath() != parent) {
+            emit failed(id, QStringLiteral("can only compress items from one folder"));
+            return;
+        }
+        names.append(info.fileName());
+    }
+
+    // suggestName always steps to "(2)" — it exists to resolve a collision, not to name
+    // the first one. Only reach for it when the plain name is actually taken.
+    QString target = joinPath(destinationDir, archiveName);
+    if (QFileInfo::exists(target))
+        target = joinPath(destinationDir, suggestName(destinationDir, archiveName));
+
+    int expected = 0;
+    for (const QString &source : sources)
+        expected += countEntries(source);
+
+    QProcess process;
+    process.setProgram(program);
+    // -a: the format comes from the extension. -C: names stay relative to their folder.
+    process.setArguments(QStringList{ QStringLiteral("-a"), QStringLiteral("-c"),
+                                      QStringLiteral("-v"), QStringLiteral("-f"), target,
+                                      QStringLiteral("-C"), parent } + names);
+    process.start();
+
+    if (!process.waitForStarted(5000)) {
+        emit failed(id, QStringLiteral("could not run bsdtar"));
+        return;
+    }
+
+    // bsdtar writes one "a <path>" line per entry to stderr, and its errors there too.
+    int done = 0;
+    QByteArray diagnostics;
+    while (process.state() != QProcess::NotRunning) {
+        if (cancelled()) {
+            process.kill();
+            process.waitForFinished(3000);
+            // A half-written archive is not a result anybody wants left behind.
+            QFile::remove(target);
+            emit failed(id, QStringLiteral("cancelled"));
+            return;
+        }
+
+        if (!process.waitForReadyRead(200))
+            continue;
+
+        const QByteArray chunk = process.readAllStandardError();
+        diagnostics.append(chunk);
+        for (const QByteArray &line : chunk.split('\n')) {
+            if (!line.startsWith("a "))
+                continue;
+            ++done;
+            if (expected > 0) {
+                emit progress(id, qMin(1.0, double(done) / double(expected)),
+                              QString::fromLocal8Bit(line.mid(2)));
+            }
+        }
+    }
+    process.waitForFinished(3000);
+    diagnostics.append(process.readAllStandardError());
+
+    if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0) {
+        QFile::remove(target);
+        // bsdtar names the file it choked on; that line is the useful half of its output.
+        QString reason;
+        for (const QByteArray &line : diagnostics.split('\n')) {
+            if (line.startsWith("bsdtar: ")) {
+                reason = QString::fromLocal8Bit(line.mid(8)).trimmed();
+                break;
+            }
+        }
+        emit failed(id, reason.isEmpty() ? QStringLiteral("could not create the archive")
+                                         : reason);
+        return;
+    }
+
+    JournalEntry entry;
+    entry.kind = JournalEntry::Created;
+    entry.created.append(target);
+    entry.summary = QStringLiteral("Compressed %1 to %2")
+                        .arg(sources.size())
+                        .arg(QFileInfo(target).fileName());
     emit finished(id, entry);
 }
 
