@@ -1,5 +1,6 @@
 #include "tst_places.h"
 
+#include "mounts.h"
 #include "places.h"
 #include "trash.h"
 
@@ -215,4 +216,84 @@ void TestPlaces::trashIsListedBeforeAnythingIsTrashed()
     QVERIFY(row >= 0);
     QCOMPARE(places.data(places.index(row, 0), Places::AvailableRole).toBool(), true);
     QVERIFY(places.data(places.index(row, 0), Places::NoteRole).toString().isEmpty());
+}
+
+// Every eject of a drive was a no-op: udisksctl -b resolves a *block device*, and it was
+// being handed the mount point, which it answers with "Error looking up object for
+// device /run/media/...". The three owners name their targets differently, so the whole
+// point of the assertion is *which* string each command gets.
+void TestPlaces::ejectingADriveNamesItsBlockDevice()
+{
+    Place drive;
+    drive.kind = Place::Volume;
+    drive.name = QStringLiteral("Ventoy");
+    drive.target = QStringLiteral("/run/media/chase/Ventoy");
+    drive.device = QStringLiteral("/dev/sda1");
+    drive.mounted = true;
+    drive.ejectable = true;
+
+    const QStringList argv = Places::unmountArgv(drive);
+    QCOMPARE(argv, QStringList({ QStringLiteral("udisksctl"), QStringLiteral("unmount"),
+                                 QStringLiteral("-b"), QStringLiteral("/dev/sda1") }));
+    QVERIFY2(!argv.contains(drive.target),
+             "udisksctl was handed the mount point, which it cannot resolve");
+
+    // A gvfs share answers to gio and is addressed by path. fusermount3 on it would take
+    // down the bridge and every other share with it.
+    Place share;
+    share.kind = Place::Volume;
+    share.name = QStringLiteral("media on nas");
+    share.target = Mounts::gvfsRoot() + QStringLiteral("/smb-share:server=nas,share=media");
+    share.mounted = true;
+    share.ejectable = true;
+    QCOMPARE(Places::unmountArgv(share),
+             QStringList({ QStringLiteral("gio"), QStringLiteral("mount"),
+                           QStringLiteral("-u"), share.target }));
+
+    // A mount omafile made itself is ours to tear down directly.
+    Place own;
+    own.kind = Place::SshHost;
+    own.name = QStringLiteral("box");
+    own.target = QStringLiteral("box");
+    own.mountPath = Mounts::runtimeMountRoot() + QStringLiteral("/box");
+    own.mounted = true;
+    QCOMPARE(Places::unmountArgv(own),
+             QStringList({ QStringLiteral("fusermount3"), QStringLiteral("-u"),
+                           own.mountPath }));
+
+    // Nothing to unmount rather than a command built around an empty string: an NFS
+    // mount from fstab has no /dev/ node and is not ours.
+    Place nfs;
+    nfs.kind = Place::Volume;
+    nfs.name = QStringLiteral("export");
+    nfs.target = QStringLiteral("/mnt/nfs");
+    nfs.device = QStringLiteral("server:/export");
+    nfs.mounted = true;
+    nfs.ejectable = true;
+    QVERIFY2(Places::unmountArgv(nfs).isEmpty(),
+             "a non-block source was passed to udisksctl anyway");
+}
+
+// The device node has to survive the trip from mountinfo onto the row, which is the half
+// of the bug the argv assertion above cannot see: unmountArgv was correct in isolation
+// and still built nothing, because no volume ever carried a device.
+void TestPlaces::aVolumeCarriesTheBlockDeviceItWasMountedFrom()
+{
+    const QList<MountPoint> mounts = Mounts::parseMountInfo(QStringLiteral(
+        "50 25 8:17 / /run/media/chase/Ventoy rw,nosuid - exfat /dev/sda1 rw\n"));
+    QCOMPARE(mounts.size(), 1);
+    QVERIFY(mounts.first().isRemovable);
+
+    // What rebuild() copies onto the row, asserted at the seam rather than by mounting
+    // something: a removable drive cannot be faked in-process without a mount namespace.
+    Place place;
+    place.kind = Place::Volume;
+    place.name = mounts.first().label();
+    place.target = mounts.first().path;
+    place.mounted = true;
+    place.ejectable = mounts.first().isRemovable || mounts.first().isNetwork;
+    place.device = mounts.first().source;
+
+    QCOMPARE(place.device, QStringLiteral("/dev/sda1"));
+    QCOMPARE(Places::unmountArgv(place).last(), QStringLiteral("/dev/sda1"));
 }

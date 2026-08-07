@@ -326,6 +326,7 @@ void Places::rebuild()
         place.target = mount.path;
         place.mounted = true;
         place.ejectable = mount.isRemovable || mount.isNetwork;
+        place.device = mount.source;
         m_places.append(place);
     }
 
@@ -923,6 +924,31 @@ void Places::cancelPassword()
     m_pendingSubPath.clear();
 }
 
+QStringList Places::unmountArgv(const Place &place)
+{
+    const QString path = place.mountPath.isEmpty() ? place.target : place.mountPath;
+
+    // Three owners, three commands, and each one names its target its own way. A gvfs
+    // share is not ours: unmounting it with fusermount3 would take down the whole gvfs
+    // bridge and every other share with it, and udisks has never heard of it.
+    if (Mounts::isGvfsShare(path))
+        return { QStringLiteral("gio"), QStringLiteral("mount"), QStringLiteral("-u"), path };
+
+    if (path.startsWith(Mounts::runtimeMountRoot()))
+        return { QStringLiteral("fusermount3"), QStringLiteral("-u"), path };
+
+    // udisksctl -b takes the block device node, never the mount point. Handed a
+    // directory it answers "Error looking up object for device /run/media/..." and
+    // nothing is unmounted — which is exactly what every eject of a drive did, because
+    // the mount path was the only thing a volume carried.
+    if (place.device.startsWith(QStringLiteral("/dev/"))) {
+        return { QStringLiteral("udisksctl"), QStringLiteral("unmount"),
+                 QStringLiteral("-b"), place.device };
+    }
+
+    return {};
+}
+
 void Places::eject(int row)
 {
     if (row < 0 || row >= m_places.size())
@@ -932,26 +958,19 @@ void Places::eject(int row)
     if (!place.ejectable && !place.mounted)
         return;
 
-    const QString path = place.mountPath.isEmpty() ? place.target : place.mountPath;
+    const QStringList argv = unmountArgv(place);
     QString error;
 
-    // Three owners, three commands. A gvfs share is not ours: unmounting it with
-    // fusermount3 would take down the whole gvfs bridge and every other share with it,
-    // and udisks has never heard of it.
-    if (Mounts::isGvfsShare(path)) {
-        if (Mounts::hasGio())
-            runCommand(QStringLiteral("gio"),
-                       { QStringLiteral("mount"), QStringLiteral("-u"), path }, 15000, &error);
-        else
-            error = QStringLiteral("gvfs is not installed");
-    } else if (path.startsWith(Mounts::runtimeMountRoot())) {
-        runCommand(QStringLiteral("fusermount3"), { QStringLiteral("-u"), path }, 10000,
-                   &error);
-    } else if (Mounts::hasUdisks()) {
-        runCommand(QStringLiteral("udisksctl"),
-                   { QStringLiteral("unmount"), QStringLiteral("-b"), path }, 15000, &error);
-    } else {
+    if (argv.isEmpty()) {
+        // A network share mounted by something else (fstab, autofs) belongs to root, not
+        // to us, and saying which drive is more use than naming a tool nobody ran.
+        error = QStringLiteral("Nothing here can unmount %1").arg(place.name);
+    } else if (argv.first() == QLatin1String("gio") && !Mounts::hasGio()) {
+        error = QStringLiteral("gvfs is not installed");
+    } else if (argv.first() == QLatin1String("udisksctl") && !Mounts::hasUdisks()) {
         error = QStringLiteral("udisks2 is not installed");
+    } else {
+        runCommand(argv.first(), argv.mid(1), 15000, &error);
     }
 
     emit status(error.isEmpty() ? QStringLiteral("Ejected %1").arg(place.name) : error);

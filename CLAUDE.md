@@ -263,7 +263,7 @@ here. Since then: right-click menus on all four surfaces, pinning files as well 
 folders, breadcrumb drop targets, and the three separate desktop hooks that decide what
 opens a folder (see Decisions).
 
-222 C++ tests and 9 QML tests pass. `bin/test` builds and runs both binaries and holds the
+224 C++ tests and 9 QML tests pass. `bin/test` builds and runs both binaries and holds the
 §12 budgets; CI does the same on Arch and then packages.
 
 ---
@@ -427,6 +427,36 @@ puts the machine in exactly the state being complained about — attached, not m
 where the sidebar lists `Ventoy` as an ordinary drive. Driving `Places::activate` on that row
 directly (rather than synthesising a click) mounted it and emitted
 `navigate -> /run/media/warforged/Ventoy`, which also put the drive back as it was found.
+
+### Ejecting a drive
+
+**`udisksctl unmount -b` takes the block device node, never the mount point** — and the
+mount point was the only thing a volume carried, so every eject of a drive was a silent
+no-op. `-b` resolves its argument to a UDisks2 block object; handed a directory it
+answers `Error looking up object for device /run/media/…` and unmounts nothing. Confirmed
+on this machine with the read-only `udisksctl info -b`, which fails the same way on
+`/boot` and succeeds on `/dev/nvme0n1p1`.
+
+The device node was already there and simply never plumbed through: `parseMountInfo` puts
+it in `MountPoint::source`, which `rebuild()` now copies onto `Place::device`. That is why
+the fix needs two tests rather than one — `unmountArgv` can be entirely correct in
+isolation and still build nothing, because no volume ever carried a device.
+
+**The three owners are now one pure function.** `Places::unmountArgv` returns argv for a
+place, so the thing worth asserting — *which string each of the three commands gets* — is
+testable without a real mount. A removable drive cannot be faked in-process, so the
+alternative was another mount-namespace exercise like the one the mount-watcher tests
+needed.
+
+**A source that is not a `/dev/` node returns nothing rather than being passed anyway.**
+An NFS or CIFS mount from fstab has a source like `server:/export` and belongs to root;
+handing that to udisksctl produced the same "looking up object" failure the bug was made
+of, only with a more confusing message. It reports that nothing here can unmount it.
+
+**Unverified against a real drive.** No removable media is attached to this machine right
+now, so the diagnosis rests on `udisksctl info -b` and the argv assertions. Re-check with
+a stick in: eject from the sidebar menu, and confirm the row returns as an unmounted
+`Place::Device` rather than disappearing.
 
 ### Drives appear while the window is open
 

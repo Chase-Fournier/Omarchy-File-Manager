@@ -20,6 +20,7 @@ struct Place
     QString target;    // a Location string, or a host/remote name to connect to
     QString note;      // why it is unavailable, shown instead of acting
     QString mountPath; // set once mounted
+    QString device;    // block device node (e.g. /dev/sda1), for udisksctl unmount -b
     bool available = true;
     bool mounted = false;
     bool ejectable = false;
@@ -61,6 +62,12 @@ public:
     // Navigates, mounting first when the row is a host or remote that is not up yet.
     Q_INVOKABLE void activate(int row);
     Q_INVOKABLE void eject(int row);
+
+    // Which command unmounts this place, as argv with the program first — the three
+    // owners of §10.3's mounts, each of which names its target differently. Pure, and
+    // separate from eject() so those three can be pinned without a real mount. Empty
+    // when the place names nothing that can be unmounted.
+    static QStringList unmountArgv(const Place &place);
 
     Q_INVOKABLE void addBookmark(const QString &path);
     Q_INVOKABLE bool isBookmarked(const QString &path) const;

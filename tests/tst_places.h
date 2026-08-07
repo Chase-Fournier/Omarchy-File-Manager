@@ -22,6 +22,8 @@ private slots:
     void pinningTwiceIsANoOp();
     void trashSitsUnderThePins();
     void trashIsListedBeforeAnythingIsTrashed();
+    void ejectingADriveNamesItsBlockDevice();
+    void aVolumeCarriesTheBlockDeviceItWasMountedFrom();
 
 private:
     QString pinsFile() const;
