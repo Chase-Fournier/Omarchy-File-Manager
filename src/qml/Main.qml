@@ -1134,6 +1134,7 @@ Window {
         mode: "progress"
         progress: Ops.progress
         detail: Ops.progressName
+        rate: Ops.progressRate
         label: "Working…"
 
         // Escape cancels the operation itself; the worker checks the flag in its inner

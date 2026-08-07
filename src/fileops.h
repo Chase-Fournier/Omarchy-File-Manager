@@ -2,6 +2,7 @@
 
 #include "journal.h"
 
+#include <QElapsedTimer>
 #include <QMutex>
 #include <QObject>
 #include <QVariantMap>
@@ -78,7 +79,11 @@ public slots:
 signals:
     // A fraction rather than a count, because copies measure bytes and everything else
     // measures items, and the status bar only ever draws a thin line.
-    void progress(quint64 id, double fraction, const QString &currentName);
+    //
+    // `bytesPerSecond` is 0 for the operations that count items rather than bytes — there
+    // is no honest rate to show for "renamed 4 of 9" — and the UI hides it when it is.
+    void progress(quint64 id, double fraction, const QString &currentName,
+                  double bytesPerSecond);
     void conflict(quint64 id, const QString &targetPath, const QString &suggestedName);
     void finished(quint64 id, const JournalEntry &journal);
     void failed(quint64 id, const QString &message);
@@ -100,6 +105,13 @@ private:
     static qint64 treeSize(const QString &path);
     static QString suggestName(const QString &directory, const QString &name);
 
+public:
+    // The rate smoothing, pure so it can be pinned without a copy slow enough to sample.
+    // `bytes` may be negative when a sample spans a counter reset; that is not a rate.
+    static double blendRate(double previous, qint64 bytes, qint64 ms);
+
+private:
+
     std::atomic<bool> m_cancelled { false };
 
     QMutex m_conflictMutex;
@@ -111,4 +123,25 @@ private:
     // Byte accounting for the current copy, so progress is smooth across many files.
     qint64 m_bytesTotal = 0;
     qint64 m_bytesDone = 0;
+
+    // Emits progress for a byte-counting operation, with the rate attached. Every copy
+    // path goes through here so the smoothing cannot be forgotten at one of them.
+    void reportBytes(quint64 id, const QString &name);
+    // Resets the byte counter and the rate mark together — see the comment at the definition.
+    void restartByteAccounting(qint64 total);
+    // Waits for the destination to actually take the data, announcing the wait. Called
+    // before finished(), and on a cross-filesystem move before the original is removed.
+    void flushAndReport(quint64 id, const QString &destinationDir);
+    // A rate measured over a window rather than per chunk: chunk times are far too jumpy
+    // to read, and an unsmoothed number flickers through two orders of magnitude.
+    double measureSpeed();
+
+    // Bytes written but not yet known to be on the device, charged against one shared
+    // budget so a pile of small files does not pay an fsync each.
+    qint64 m_unsyncedBytes = 0;
+
+    QElapsedTimer m_speedClock;
+    qint64 m_speedMarkBytes = 0;
+    qint64 m_speedMarkMs = 0;
+    double m_speed = 0.0;
 };

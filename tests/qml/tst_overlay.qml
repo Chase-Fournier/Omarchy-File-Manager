@@ -51,6 +51,7 @@ Item {
             overlay.mode = "progress"
             overlay.label = "Working…"
             overlay.detail = ""
+            overlay.rate = ""
             overlay.progress = 0
             overlay.visible = false
             appStub.refocusCount = 0
@@ -140,6 +141,64 @@ Item {
 
         // The whole point of the modal bar: Escape has to reach it, so the operation can
         // be called off without hunting for a button.
+        // The rate is the part that answers "is this moving at all", so it has to survive
+        // beside a long filename rather than being elided away with it.
+        function test_rateIsShownBesideTheName() {
+            overlay.detail = "some/very/long/path/that/goes/on/and/on/file-number-30.bin"
+            overlay.rate = "12.4 MB/s"
+            overlay.progress = 0.5
+            overlay.open()
+            wait(0)
+
+            let rateItem = null
+            let nameItem = null
+            function walk(item) {
+                for (let i = 0; i < item.children.length; ++i) {
+                    const child = item.children[i]
+                    if (child.hasOwnProperty("text") && child.visible) {
+                        if (child.text === "12.4 MB/s")
+                            rateItem = child
+                        if (child.text === overlay.detail)
+                            nameItem = child
+                    }
+                    walk(child)
+                }
+            }
+            walk(overlay)
+
+            verify(rateItem !== null, "the transfer rate is not shown")
+            verify(rateItem.width > 0, "the rate collapsed to nothing")
+            verify(nameItem !== null, "the entry name disappeared once a rate was shown")
+            // Side by side, not stacked on each other: the name gives up the space.
+            verify(nameItem.x + nameItem.width <= rateItem.x + 1,
+                   "the name and the rate overlap")
+        }
+
+        // Item-counting work (a bulk rename, an extraction) has no honest byte rate, and
+        // an empty rate must give its space back rather than leaving a gap.
+        function test_noRateLeavesTheNameTheWholeLine() {
+            overlay.detail = "file-30.bin"
+            overlay.rate = ""
+            overlay.progress = 0.5
+            overlay.open()
+            wait(0)
+
+            let nameItem = null
+            function walk(item) {
+                for (let i = 0; i < item.children.length; ++i) {
+                    const child = item.children[i]
+                    if (child.hasOwnProperty("text") && child.visible
+                        && child.text === "file-30.bin")
+                        nameItem = child
+                    walk(child)
+                }
+            }
+            walk(overlay)
+
+            verify(nameItem !== null, "the entry name is not shown without a rate")
+            verify(nameItem.width > 200, "the name did not take the space the rate left")
+        }
+
         function test_escapeAsksToCancel() {
             let cancelled = false
             overlay.cancelled.connect(function () { cancelled = true })

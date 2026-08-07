@@ -50,6 +50,9 @@ private slots:
     void extractionFolderDropsTheWholeSuffix();
     void extractingTwiceDoesNotMerge();
     void extractionRefusesToEscapeItsFolder();
+    void aFileLargerThanOneChunkCopiesWhole();
+    void copyReportsARateAndItemWorkDoesNot();
+    void rateSmoothingSeedsSettlesAndRefusesNonsense();
 
     void describesWhatAnEntryIs();
     void executableBitFollowsTheReadBits();

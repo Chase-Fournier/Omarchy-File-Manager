@@ -20,6 +20,9 @@ class Operations : public QObject
     Q_PROPERTY(bool busy READ busy NOTIFY busyChanged)
     Q_PROPERTY(double progress READ progress NOTIFY progressChanged)
     Q_PROPERTY(QString progressName READ progressName NOTIFY progressChanged)
+    // Already formatted ("12.4 MB/s"), and empty for the operations that count items
+    // rather than bytes — there is no honest rate to show for those.
+    Q_PROPERTY(QString progressRate READ progressRate NOTIFY progressChanged)
     Q_PROPERTY(QString status READ status NOTIFY statusChanged)
     Q_PROPERTY(bool canUndo READ canUndo NOTIFY canUndoChanged)
     Q_PROPERTY(bool canPaste READ canPaste NOTIFY clipboardChanged)
@@ -35,6 +38,7 @@ public:
     bool busy() const { return m_busy; }
     double progress() const { return m_progress; }
     QString progressName() const { return m_progressName; }
+    QString progressRate() const { return m_progressRate; }
     QString status() const { return m_status; }
     bool canUndo() const { return m_journal.canUndo(); }
     bool canPaste() const;
@@ -139,7 +143,7 @@ signals:
     void details(const QVariantMap &info);
 
 private slots:
-    void onProgress(quint64 id, double fraction, const QString &name);
+    void onProgress(quint64 id, double fraction, const QString &name, double bytesPerSecond);
     void onConflict(quint64 id, const QString &targetPath, const QString &suggestedName);
     void onFinished(quint64 id, const JournalEntry &journal);
     void onFailed(quint64 id, const QString &message);
@@ -160,6 +164,7 @@ private:
     bool m_busy = false;
     double m_progress = 0.0;
     QString m_progressName;
+    QString m_progressRate;
     QString m_status;
 
     bool m_conflictActive = false;

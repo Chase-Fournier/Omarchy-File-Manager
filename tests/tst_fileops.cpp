@@ -947,3 +947,118 @@ void TestFileOps::uriListEncodesAwkwardPaths()
     // RFC 2483 says CRLF, and GTK's parser is strict about it.
     QVERIFY(list.contains(QStringLiteral("\r\n")));
 }
+
+// copy_file_range used to be handed the whole file at once; it is capped to a chunk now,
+// so the throttle gets a say between chunks. That makes the loop's arithmetic load-bearing
+// in a way it was not before — an off-by-one in the remaining/offset bookkeeping truncates
+// or mis-orders a large file, which a few-kilobyte fixture would never notice.
+//
+// The pattern is position-dependent so a dropped or repeated chunk fails, not just a
+// wrong length.
+void TestFileOps::aFileLargerThanOneChunkCopiesWhole()
+{
+    constexpr int kSize = 20 * 1024 * 1024; // several chunks either side of a boundary
+    QByteArray payload(kSize, Qt::Uninitialized);
+    for (int i = 0; i < kSize; ++i)
+        payload[i] = char((i * 31 + (i >> 13)) & 0xFF);
+
+    write(QStringLiteral("work/src/big.bin"), payload);
+    QVERIFY(QDir().mkpath(path(QStringLiteral("work/dst"))));
+
+    QString failure;
+    const JournalEntry entry = runOperation(
+        [&](FileOps *ops, quint64 id) {
+            ops->copy({ path(QStringLiteral("work/src/big.bin")) },
+                      path(QStringLiteral("work/dst")), id);
+        },
+        &failure);
+    QVERIFY2(failure.isEmpty(), qPrintable(failure));
+
+    const QString target = path(QStringLiteral("work/dst/big.bin"));
+    QCOMPARE(QFileInfo(target).size(), qint64(kSize));
+    QCOMPARE(readAll(target), payload);
+    QCOMPARE(entry.created, QStringList { target });
+}
+
+// The bar reaching 100% has to mean the bytes are down, not merely accepted by the page
+// cache — that gap is what left a transfer onto a stick sitting at 100% for minutes after
+// the overlay had already closed. What is asserted here is the contract the UI reads:
+// progress ends at exactly 1.0, a rate is never negative or nonsensical, and an
+// item-counting operation reports no rate at all rather than a fabricated one.
+//
+// The blending itself is pinned separately below: on any real filesystem a fixture small
+// enough for a unit test finishes well inside one sampling window, so a test that waited
+// for a live sample would either be flaky or have to copy a gigabyte.
+void TestFileOps::copyReportsARateAndItemWorkDoesNot()
+{
+    write(QStringLiteral("work/src/big.bin"), QByteArray(12 * 1024 * 1024, 'q'));
+    QVERIFY(QDir().mkpath(path(QStringLiteral("work/dst"))));
+
+    bool reachedFull = false;
+    bool sawBadRate = false;
+    QString lastName;
+    double lastFraction = 0.0;
+
+    {
+        FileOps ops;
+        QObject::connect(&ops, &FileOps::progress, &ops,
+                         [&](quint64, double fraction, const QString &name, double rate) {
+                             if (qFuzzyCompare(fraction, 1.0))
+                                 reachedFull = true;
+                             lastFraction = fraction;
+                             lastName = name;
+                             if (rate < 0.0 || !qIsFinite(rate))
+                                 sawBadRate = true;
+                         });
+        ops.copy({ path(QStringLiteral("work/src/big.bin")) },
+                 path(QStringLiteral("work/dst")), 1);
+    }
+
+    QVERIFY2(reachedFull, "the copy never reported itself complete");
+    QVERIFY2(!sawBadRate, "a progress report carried a negative or non-finite rate");
+
+    // The last thing reported before finished() is the flush, not 100%. This is the
+    // assertion that pins the actual complaint: the drive is still being written to after
+    // the last byte is handed over, and the window must say so rather than closing.
+    QVERIFY2(lastFraction < 0.0,
+             "the operation ended on a full bar instead of waiting for the drive");
+    QVERIFY2(lastName.contains(QStringLiteral("Flushing")),
+             qPrintable(QStringLiteral("the flush was not announced; last said: ") + lastName));
+
+    // Trash counts items, not bytes: there is no honest rate for it, and 0 is how the UI
+    // is told to show nothing rather than "0 B/s".
+    bool everReportedARate = false;
+    {
+        FileOps ops;
+        QObject::connect(&ops, &FileOps::progress, &ops,
+                         [&](quint64, double, const QString &, double rate) {
+                             if (rate != 0.0)
+                                 everReportedARate = true;
+                         });
+        ops.trash({ path(QStringLiteral("work/dst/big.bin")) }, 2);
+    }
+    QVERIFY2(!everReportedARate, "an item-counting operation invented a byte rate");
+}
+
+// The three ways the rate arithmetic can be wrong, none of which need a filesystem.
+void TestFileOps::rateSmoothingSeedsSettlesAndRefusesNonsense()
+{
+    // Seeded from the first real sample. Easing up from zero instead would open every
+    // copy by reporting a fraction of the true speed for several seconds.
+    QCOMPARE(FileOps::blendRate(0.0, 10 * 1000 * 1000, 1000), 10.0e6);
+
+    // A steady rate stays put rather than drifting.
+    QCOMPARE(FileOps::blendRate(10.0e6, 10 * 1000 * 1000, 1000), 10.0e6);
+
+    // A change is followed, but damped — the point of smoothing is that one slow chunk
+    // does not make the readout jump an order of magnitude.
+    const double halved = FileOps::blendRate(10.0e6, 5 * 1000 * 1000, 1000);
+    QVERIFY2(halved < 10.0e6 && halved > 5.0e6, "a rate change was either ignored or unsmoothed");
+
+    // A sample spanning a counter reset (the cross-filesystem move restarts it per source)
+    // reads as negative bytes. That is not a negative speed.
+    QVERIFY(FileOps::blendRate(10.0e6, -4000, 1000) >= 0.0);
+
+    // A zero-length window would divide by zero and render as "inf B/s".
+    QCOMPARE(FileOps::blendRate(10.0e6, 5000, 0), 10.0e6);
+}

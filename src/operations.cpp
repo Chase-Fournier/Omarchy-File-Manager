@@ -113,6 +113,7 @@ quint64 Operations::begin()
 {
     m_progress = 0.0;
     m_progressName.clear();
+    m_progressRate.clear();
     if (!m_busy) {
         m_busy = true;
         emit busyChanged();
@@ -625,12 +626,18 @@ void Operations::openAtLine(const QString &path, int line)
     process.startDetached();
 }
 
-void Operations::onProgress(quint64 id, double fraction, const QString &name)
+void Operations::onProgress(quint64 id, double fraction, const QString &name,
+                            double bytesPerSecond)
 {
     if (id != m_id)
         return;
     m_progress = fraction;
     m_progressName = name;
+    // Formatted here rather than in QML: humanSize already picks the unit the rest of the
+    // window uses, so a rate cannot end up spelled differently from a size.
+    m_progressRate = bytesPerSecond > 0.0
+        ? Formatting::humanSize(qint64(bytesPerSecond)) + QStringLiteral("/s")
+        : QString();
     emit progressChanged();
 }
 
@@ -661,6 +668,7 @@ void Operations::onFinished(quint64 id, const JournalEntry &journal)
     m_busy = false;
     m_progress = 0.0;
     m_progressName.clear();
+    m_progressRate.clear();
     emit busyChanged();
     emit progressChanged();
 

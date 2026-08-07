@@ -263,7 +263,7 @@ here. Since then: right-click menus on all four surfaces, pinning files as well 
 folders, breadcrumb drop targets, and the three separate desktop hooks that decide what
 opens a folder (see Decisions).
 
-224 C++ tests and 9 QML tests pass. `bin/test` builds and runs both binaries and holds the
+227 C++ tests and 18 QML tests pass. `bin/test` builds and runs both binaries and holds the
 §12 budgets; CI does the same on Arch and then packages.
 
 ---
@@ -390,6 +390,67 @@ out at 200 ms, nothing was parsed until the process had already exited, and the 
 empty for the whole operation before jumping to done. `setReadChannel(StandardError)` is
 the fix. The symptom looked exactly like "progress is not implemented", which is why it
 survived the first screenshot: the overlay was correct and the data never arrived.
+
+### 100% did not mean finished
+
+Reported from real use: a transfer onto a drive sat at 100% for minutes and the overlay
+closed while it was still writing.
+
+**`write()` returns when the page cache accepts the bytes, not when the drive has them.**
+So the bar measured how fast this machine can fill RAM. Measured here rather than assumed:
+writing a 3 GB file to btrfs on NVMe left **45 MB still unwritten** at the moment `write()`
+reported the whole file done, at an apparent 2.8 GB/s — a rate no device on this machine
+sustains. On a stick the same gap is the whole complaint, because the drive drains at a
+hundredth of the speed the cache accepts.
+
+The ceiling is `vm.dirty_bytes`, **256 MB** on this machine, not the 20%-of-RAM default —
+worth knowing because it is what bounds the old worst case. 256 MB draining at a bad
+stick's few MB/s is the "few minutes" that was observed.
+
+**Three parts, and only the third is what "closed too early" was about:**
+
+- **The copy is throttled** to 64 MB of outstanding writeback (`sync_file_range`, WRITE to
+  start it and WAIT_BEFORE to bound it), so the bar tracks the drive instead of the cache.
+  `copy_file_range` is capped to 8 MB a call, because the throttle only gets a say between
+  chunks.
+- **Flushes are charged against one shared budget, not one fsync per file.** An
+  unconditional per-file fsync is the obvious implementation and it is a serious
+  regression: on a slow drive each one is a round trip and a metadata commit, so a folder
+  of ten thousand small files would pay ten thousand of them. Verified by interception —
+  a directory of small files does *no* fsync, a 20 MB file does none either (it is inside
+  the budget), and the operation ends with one `syncfs`.
+- **`syncfs` before `finished()`**, which is what actually stops the overlay closing on a
+  transfer that is still running. On a cross-filesystem *move* it goes further and runs
+  before the original is deleted — that case is a copy followed by a delete, and deleting
+  while the copy is only in the page cache is a data-loss risk rather than a cosmetic one.
+
+**The flush is announced and indeterminate.** Waiting silently would only trade "the
+overlay closed too early" for "the overlay sat at 100% doing nothing", so the phase says
+"Flushing to drive…" and uses the travelling block — how long a drive needs to drain its
+own cache is not knowable from this side.
+
+**Throttling costs nothing on fast storage, which is why the window is 64 MB and not
+smaller.** 3 GB to NVMe: 1.87 s to durable unthrottled, 1.70 s throttled — inside the
+noise, because the device drains faster than the loop can refill it. A smaller window
+would start blocking a fast drive for no gain.
+
+**The rate is smoothed, and `blendRate` is pure so it can be tested.** A per-chunk rate
+reads the cache's speed on one chunk and the drive's on the next; a whole-operation average
+takes minutes to notice a drive slowing down. The window is 250 ms specifically because the
+overlay appears at 300 ms — anything wider shows the panel with the rate line still empty,
+which reads as a stall. On any real filesystem a fixture small enough for a unit test
+finishes inside one window, so the arithmetic is pinned directly rather than by waiting for
+a live sample.
+
+**A rate of 0 means "no honest rate", not "0 B/s".** Item-counting work — bulk rename,
+extraction — passes 0 and the UI gives the line's space back to the filename.
+
+**Unverified on a slow device.** No removable media is attached to this machine, so the
+syscall behaviour was confirmed by interception and the throughput on NVMe, but the
+minutes-long case that prompted this has not been reproduced end to end. Worth re-checking
+with a stick: the bar should advance at the drive's pace, the rate should read like a
+stick and not like RAM, and the window should stay up saying "Flushing to drive…" instead
+of vanishing.
 
 ### A drive that is plugged in but not mounted
 

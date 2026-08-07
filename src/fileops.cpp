@@ -22,6 +22,35 @@
 
 namespace {
 
+// How much written-but-not-yet-durable data a copy is allowed to run ahead by.
+//
+// This is the whole of the honesty fix. write() and copy_file_range() return as soon as
+// the bytes are in the page cache, so with no bound the bar reaches 100% at RAM speed and
+// the operation then reports itself finished while the drive is still draining — minutes,
+// on a USB stick. Measured on this machine: writing a 3 GB file to btrfs on NVMe left
+// 45 MB still unwritten at the moment write() claimed the whole file was done, and the
+// "speed" that implies (2.8 GB/s) is not a rate any device here actually sustains.
+//
+// 64 MB is picked so a fast device never blocks on the throttle at all — an NVMe drains
+// that in well under the time it takes to refill it — while a slow one is held to within
+// 64 MB of the truth rather than gigabytes. It doubles as the flush budget across files,
+// so the overshoot cannot accumulate over a copy of many of them, and whatever is left at
+// the end is waited for by flushFilesystemAt() before the operation reports itself done.
+constexpr off_t kWritebackWindow = 64 * 1024 * 1024;
+
+// The throttle only gets a say between chunks, so a chunk has to be small relative to the
+// window. 8 MB is large enough that the per-call overhead is irrelevant.
+constexpr off_t kCopyChunk = 8 * 1024 * 1024;
+
+// Rates are measured over at least this long. Chunk-to-chunk timings swing through orders
+// of magnitude and are unreadable; this plus the smoothing below gives a number that
+// settles without lagging a real change in speed.
+//
+// 250 ms rather than something longer because the progress overlay appears at 300 ms
+// (§4's "no spinner for under 300 ms of work"): a window wider than that would show the
+// panel with the rate line still empty, which reads as a stalled transfer.
+constexpr qint64 kSpeedWindowMs = 250;
+
 QString errorString()
 {
     return QString::fromLocal8Bit(::strerror(errno));
@@ -47,6 +76,24 @@ void copyMetadata(const QString &source, const QString &target)
     times[0] = info.st_atim;
     times[1] = info.st_mtim;
     ::utimensat(AT_FDCWD, targetBytes.constData(), times, AT_SYMLINK_NOFOLLOW);
+}
+
+// Waits for everything this operation wrote to reach the device before it is called done.
+//
+// This is the difference the complaint was actually about: without it, "finished" means
+// "the page cache accepted the last byte", the overlay closes, and the drive keeps writing
+// for as long as it needs — which on a stick is minutes, with nothing on screen saying so
+// and an eject that would truncate the copy. syncfs rather than a per-file fsync because
+// by this point the files are closed, and one call covers whatever the budget above left
+// outstanding.
+void flushFilesystemAt(const QString &directory)
+{
+    const int fd = ::open(QFile::encodeName(directory).constData(),
+                          O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    if (fd < 0)
+        return;
+    ::syncfs(fd);
+    ::close(fd);
 }
 
 bool isSameFile(const QString &a, const QString &b)
@@ -115,8 +162,74 @@ void FileOps::beginOperation()
     m_applyToAll = false;
     m_answered = false;
     m_choice = Replace;
-    m_bytesTotal = 0;
+    restartByteAccounting(0);
+    m_speed = 0.0;
+    m_unsyncedBytes = 0;
+}
+
+// Byte counter and rate mark together: they are two halves of one measurement, and moving
+// one without the other yields a rate computed against a count that no longer exists.
+void FileOps::restartByteAccounting(qint64 total)
+{
+    m_bytesTotal = total;
     m_bytesDone = 0;
+    m_speedMarkBytes = 0;
+    m_speedMarkMs = 0;
+    m_speedClock.start();
+}
+
+// An exponential moving average. Sampling every chunk instead would report the page
+// cache's speed on one chunk and the drive's on the next; averaging over the whole
+// operation would take minutes to notice a drive that had slowed down.
+//
+// Pure and separate from the clock so the blending is testable without a copy slow enough
+// to sample — the arithmetic is the part that can be wrong, and on any real filesystem a
+// test fixture finishes long inside one window.
+double FileOps::blendRate(double previous, qint64 bytes, qint64 ms)
+{
+    if (ms <= 0)
+        return previous;
+    // The counter restarts mid-operation on a cross-filesystem move, so a sample can span
+    // a reset and come out negative. Nothing moved backwards; treat it as no progress.
+    const double instant = double(qMax<qint64>(0, bytes)) * 1000.0 / double(ms);
+    // Seed with the first real sample rather than easing up from zero, which would spend
+    // the opening seconds of every copy showing a rate far below the truth.
+    return previous <= 0.0 ? instant : 0.6 * previous + 0.4 * instant;
+}
+
+double FileOps::measureSpeed()
+{
+    const qint64 elapsed = m_speedClock.elapsed();
+    const qint64 sinceMark = elapsed - m_speedMarkMs;
+    if (sinceMark < kSpeedWindowMs)
+        return m_speed;
+
+    m_speed = blendRate(m_speed, m_bytesDone - m_speedMarkBytes, sinceMark);
+    m_speedMarkBytes = m_bytesDone;
+    m_speedMarkMs = elapsed;
+    return m_speed;
+}
+
+void FileOps::reportBytes(quint64 id, const QString &name)
+{
+    if (m_bytesTotal <= 0)
+        return;
+    emit progress(id, double(m_bytesDone) / double(m_bytesTotal), name, measureSpeed());
+}
+
+// The last stretch, and the one the complaint was about. Waiting here silently would only
+// trade "the overlay closed too early" for "the overlay sat at 100% doing nothing", so the
+// phase says what it is — and goes indeterminate, because how long a drive needs to drain
+// its own cache is not something that can be known from this side.
+void FileOps::flushAndReport(quint64 id, const QString &destinationDir)
+{
+    // Announced only when there were bytes to move — a copy of empty files has nothing to
+    // say. The flush itself is *not* conditional: move() calls this before deleting the
+    // original, and that guarantee must not depend on how large the file happened to be.
+    if (m_bytesTotal > 0)
+        emit progress(id, -1.0, QStringLiteral("Flushing to drive…"), 0.0);
+    flushFilesystemAt(destinationDir);
+    m_unsyncedBytes = 0;
 }
 
 FileOps::Conflict FileOps::askConflict(quint64 id, const QString &target,
@@ -197,19 +310,39 @@ bool FileOps::copyFileContents(const QString &source, const QString &target, qui
 
     bool ok = true;
     off_t remaining = info.st_size;
+    const QString name = QFileInfo(source).fileName();
+
+    // How far writeback has been waited for. Everything between this and the write offset
+    // is in the page cache and not yet on the device.
+    off_t synced = 0;
+    const auto throttle = [&](off_t writtenTo) {
+        if (writtenTo > synced)
+            ::sync_file_range(out, synced, writtenTo - synced, SYNC_FILE_RANGE_WRITE);
+        // Only wait once more than a window's worth is outstanding, so a fast device is
+        // never actually held up here — it drains faster than this loop can refill it.
+        const off_t outstanding = writtenTo - synced;
+        if (outstanding <= kWritebackWindow)
+            return;
+        const off_t slice = outstanding - kWritebackWindow;
+        if (::sync_file_range(out, synced, slice, SYNC_FILE_RANGE_WAIT_BEFORE) == 0)
+            synced += slice;
+        else
+            synced = writtenTo; // unsupported here; the fsync below still covers it
+    };
 
     // copy_file_range lets the kernel (and a reflinking filesystem) avoid moving bytes
     // through userspace at all. It fails across some filesystem pairs, hence the fallback.
     while (remaining > 0 && !cancelled()) {
+        // Capped rather than handed the whole file: the throttle below can only bound
+        // what has been written when it gets a say between chunks.
         const ssize_t written = ::copy_file_range(in, nullptr, out, nullptr,
-                                                  size_t(remaining), 0);
+                                                  size_t(qMin<off_t>(remaining, kCopyChunk)), 0);
         if (written <= 0)
             break;
         remaining -= written;
         m_bytesDone += written;
-        if (m_bytesTotal > 0)
-            emit progress(id, double(m_bytesDone) / double(m_bytesTotal),
-                          QFileInfo(source).fileName());
+        throttle(info.st_size - remaining);
+        reportBytes(id, name);
     }
 
     if (remaining > 0 && !cancelled()) {
@@ -218,7 +351,7 @@ bool FileOps::copyFileContents(const QString &source, const QString &target, qui
             || ::lseek(out, info.st_size - remaining, SEEK_SET) < 0) {
             ok = false;
         } else {
-            QByteArray buffer(64 * 1024, Qt::Uninitialized);
+            QByteArray buffer(1024 * 1024, Qt::Uninitialized);
             while (remaining > 0 && !cancelled()) {
                 const ssize_t got = ::read(in, buffer.data(), size_t(qMin<qint64>(buffer.size(),
                                                                                  remaining)));
@@ -234,10 +367,23 @@ bool FileOps::copyFileContents(const QString &source, const QString &target, qui
                 }
                 remaining -= got;
                 m_bytesDone += got;
-                if (m_bytesTotal > 0)
-                    emit progress(id, double(m_bytesDone) / double(m_bytesTotal),
-                                  QFileInfo(source).fileName());
+                throttle(info.st_size - remaining);
+                reportBytes(id, name);
             }
+        }
+    }
+
+    // The tail the window deliberately left outstanding, plus whatever earlier small files
+    // left behind. Deliberately *not* an unconditional fsync per file: on a slow drive
+    // each one is a round trip and a metadata commit, so a folder of ten thousand small
+    // files would pay ten thousand of them — far worse than the stall being fixed.
+    // Charging every file against one shared budget instead makes a large file flush on
+    // its own while tiny ones flush once between them.
+    if (ok && !cancelled()) {
+        m_unsyncedBytes += qMax<off_t>(0, info.st_size - synced);
+        if (m_unsyncedBytes >= kWritebackWindow) {
+            ::fsync(out);
+            m_unsyncedBytes = 0;
         }
     }
 
@@ -357,8 +503,13 @@ void FileOps::copy(const QStringList &sources, const QString &destinationDir, qu
         }
     }
 
+    qint64 total = 0;
     for (const QString &source : sources)
-        m_bytesTotal += treeSize(source);
+        total += treeSize(source);
+    // The rate is measured from here rather than from beginOperation(): walking a large
+    // tree to size it takes real time, and counting it as time spent copying would report
+    // the first seconds of every big copy as far slower than the drive is really going.
+    restartByteAccounting(total);
 
     JournalEntry entry;
     entry.kind = JournalEntry::Copied;
@@ -375,6 +526,10 @@ void FileOps::copy(const QStringList &sources, const QString &destinationDir, qu
         if (!written.isEmpty())
             entry.created.append(written);
     }
+
+    // Before finished(), never after: the overlay closes on that signal, so anything still
+    // in flight afterwards is a transfer the user has been told is over.
+    flushAndReport(id, destinationDir);
 
     if (!error.isEmpty() && error != QLatin1String("cancelled")) {
         emit failed(id, error);
@@ -435,7 +590,7 @@ void FileOps::move(const QStringList &sources, const QString &destinationDir, qu
             }
         }
 
-        emit progress(id, double(index) / double(sources.size()), info.fileName());
+        emit progress(id, double(index) / double(sources.size()), info.fileName(), 0.0);
 
         // Same filesystem: rename(2), which is instant and atomic (§8). Across
         // filesystems there is no such thing, so it becomes copy-then-delete.
@@ -450,10 +605,18 @@ void FileOps::move(const QStringList &sources, const QString &destinationDir, qu
             break;
         }
 
-        m_bytesTotal = treeSize(source);
-        m_bytesDone = 0;
+        // Each cross-filesystem source is measured on its own, so the byte counter starts
+        // again here — and the rate has to start again with it, or the next sample reads a
+        // negative delta against a mark from the previous, larger, count.
+        restartByteAccounting(treeSize(source));
         if (!copyTree(id, source, target, &error))
             break;
+
+        // Before the original is removed, not merely before the operation is reported
+        // done. A cross-filesystem move is a copy followed by a delete, so deleting while
+        // the copy is still only in the page cache is the one case here where the stall
+        // is a data-loss risk rather than a cosmetic one.
+        flushAndReport(id, destinationDir);
 
         if (QFileInfo(source).isDir() && !QFileInfo(source).isSymLink())
             QDir(source).removeRecursively();
@@ -488,7 +651,8 @@ void FileOps::trash(const QStringList &paths, quint64 id)
             break;
 
         ++index;
-        emit progress(id, double(index) / double(paths.size()), QFileInfo(path).fileName());
+        emit progress(id, double(index) / double(paths.size()), QFileInfo(path).fileName(),
+                      0.0);
 
         Trash::Item item;
         QString error;
@@ -517,7 +681,8 @@ void FileOps::removePermanently(const QStringList &paths, quint64 id)
             break;
 
         ++index;
-        emit progress(id, double(index) / double(paths.size()), QFileInfo(path).fileName());
+        emit progress(id, double(index) / double(paths.size()), QFileInfo(path).fileName(),
+                      0.0);
 
         const QFileInfo info(path);
         const bool ok = info.isDir() && !info.isSymLink() ? QDir(path).removeRecursively()
@@ -686,7 +851,7 @@ void FileOps::compress(const QStringList &sources, const QString &destinationDir
             ++done;
             if (expected > 0) {
                 emit progress(id, qMin(1.0, double(done) / double(expected)),
-                              QString::fromLocal8Bit(line.mid(2)));
+                              QString::fromLocal8Bit(line.mid(2)), 0.0);
             }
         }
     }
@@ -799,7 +964,7 @@ void FileOps::extract(const QString &archivePath, const QString &destinationDir,
         diagnostics.append(chunk);
         for (const QByteArray &line : chunk.split('\n')) {
             if (line.startsWith("x "))
-                emit progress(id, -1.0, QString::fromLocal8Bit(line.mid(2)));
+                emit progress(id, -1.0, QString::fromLocal8Bit(line.mid(2)), 0.0);
         }
     }
     process.waitForFinished(3000);

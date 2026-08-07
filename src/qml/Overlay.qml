@@ -16,6 +16,9 @@ FocusScope {
     property real progress: 0
     // The entry currently being written, under the bar.
     property string detail: ""
+    // The transfer rate, already formatted ("12.4 MB/s"). Empty for work measured in
+    // items rather than bytes, and the line simply gives the space back to the name.
+    property string rate: ""
     property string label: ""
     property string initialText: ""
     property var choices: []          // [{ key: "r", label: "Replace", value: 0 }, ...]
@@ -195,14 +198,30 @@ FocusScope {
                     }
                 }
 
+                // The name elides and the rate does not: the rate is the part that answers
+                // "is this moving at all", and a middle-elided line would eat it first.
                 Text {
                     id: detailText
 
                     anchors.top: bar.bottom
                     anchors.topMargin: 8
-                    width: parent.width
+                    anchors.left: parent.left
+                    anchors.right: rateText.left
+                    anchors.rightMargin: rateText.text ? 12 : 0
                     elide: Text.ElideMiddle
                     text: overlay.detail
+                    color: Theme.dim
+                    font.family: app.monoFamily
+                    font.pixelSize: app.fontSize - 2
+                }
+
+                Text {
+                    id: rateText
+
+                    anchors.top: bar.bottom
+                    anchors.topMargin: 8
+                    anchors.right: parent.right
+                    text: overlay.rate
                     color: Theme.dim
                     font.family: app.monoFamily
                     font.pixelSize: app.fontSize - 2
