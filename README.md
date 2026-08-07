@@ -252,6 +252,14 @@ There is no permissions matrix and there will not be one; that is what `chmod` i
 **Create link** makes a symlink beside the current directory pointing at the selection,
 named `Link to <name>`. The target is absolute, so moving the link does not break it.
 
+**Removable drives** appear in the sidebar the moment they are plugged in — in whatever
+window is already open, with no refresh — whether or not anything has mounted them. An
+clicking one that is not mounted yet mounts it and opens it, with nothing to say about
+the difference. `Ctrl+E` ejects. Which drives
+are worth showing is udisks2's opinion, not omafile's, so the list matches what the rest
+of the desktop shows: no EFI partitions, no internal disks. Without `udisks2` installed,
+omafile falls back to listing whatever is already mounted.
+
 **Trash** sits in the sidebar under your pins, and is also in the right-click menu on
 empty space. It browses `~/.local/share/Trash/files` like any other directory, which is as
 much of a trash browser as omafile has — undo is for the operation you just did, this is

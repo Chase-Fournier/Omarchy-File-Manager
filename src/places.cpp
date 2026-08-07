@@ -6,6 +6,7 @@
 #include "opener.h"
 #include "terminal.h"
 #include "trash.h"
+#include "udisks.h"
 
 #include <QTimer>
 
@@ -15,6 +16,7 @@
 #include <QStandardPaths>
 #include <QTextStream>
 
+#include <fcntl.h>
 #include <signal.h>
 #include <unistd.h>
 
@@ -64,6 +66,18 @@ QString runCommand(const QString &program, const QStringList &arguments, int tim
     return QString::fromUtf8(process.readAllStandardOutput()).trimmed();
 }
 
+// Only the mounts the sidebar would draw. A container or a snap coming and going changes
+// the mount table constantly and changes nothing here.
+QString mountPathSignature()
+{
+    QStringList parts;
+    const QList<MountPoint> mounts = Mounts::current();
+    for (const MountPoint &mount : mounts)
+        parts.append(mount.path);
+    parts.sort();
+    return parts.join(QLatin1Char('\n'));
+}
+
 bool isMountedAt(const QString &path)
 {
     const QList<MountPoint> mounts = Mounts::current();
@@ -94,6 +108,83 @@ Places::Places(QObject *parent)
 Places::~Places()
 {
     releaseMounts();
+    if (m_mountFd >= 0)
+        ::close(m_mountFd);
+}
+
+void Places::drainMountInfo()
+{
+    if (m_mountFd < 0)
+        return;
+    // Rewind and read to the end: until the file is consumed the kernel keeps the
+    // exceptional condition raised, and QSocketNotifier would fire without pause.
+    ::lseek(m_mountFd, 0, SEEK_SET);
+    char buffer[8192];
+    while (::read(m_mountFd, buffer, sizeof(buffer)) > 0) { }
+}
+
+// What the sidebar would draw from the system: the mounts it can see, plus the drives
+// that are attached but not mounted. Both matter — a stick plugged in changes only the
+// second, and unplugging one changes both.
+QString Places::deviceSignature() const
+{
+    QStringList parts;
+    parts.append(mountPathSignature());
+    if (m_udisks) {
+        const QList<RemovableDevice> devices = m_udisks->devices();
+        for (const RemovableDevice &device : devices)
+            parts.append(device.objectPath + QLatin1Char('=') + device.mountPath);
+    }
+    return parts.join(QLatin1Char('\n'));
+}
+
+void Places::startWatchingDevices()
+{
+    if (m_udisks || !UDisks::available())
+        return;
+
+    m_udisks = new UDisks(this);
+    // A drive being attached changes no mount, so this is the only thing that reports it.
+    // Same settle timer as the mount watcher: udev and udisks between them emit several
+    // signals for one stick.
+    connect(m_udisks, &UDisks::changed, this, [this] {
+        if (m_mountSettle)
+            m_mountSettle->start();
+        else
+            refresh();
+    });
+}
+
+void Places::startWatchingMounts()
+{
+    if (m_mountFd >= 0)
+        return;
+
+    m_mountFd = ::open("/proc/self/mountinfo", O_RDONLY | O_CLOEXEC);
+    if (m_mountFd < 0)
+        return;
+    drainMountInfo();
+
+    // One mount produces several events, and udisks does its work in a few steps, so the
+    // rebuild waits for the table to stop moving rather than running once per step.
+    m_mountSettle = new QTimer(this);
+    m_mountSettle->setSingleShot(true);
+    m_mountSettle->setInterval(150);
+    connect(m_mountSettle, &QTimer::timeout, this, [this] {
+        // Rebuilding resets the model, which throws away the sidebar's scroll position —
+        // worth doing when a drive appears, not worth doing because a container started.
+        // The signature covers attached-but-unmounted drives as well, or plugging one in
+        // would be filtered out here as "nothing changed".
+        if (deviceSignature() == m_mountSignature)
+            return;
+        refresh();
+    });
+
+    m_mountNotifier = new QSocketNotifier(m_mountFd, QSocketNotifier::Exception, this);
+    connect(m_mountNotifier, &QSocketNotifier::activated, this, [this] {
+        drainMountInfo();
+        m_mountSettle->start();
+    });
 }
 
 int Places::rowCount(const QModelIndex &parent) const
@@ -153,6 +244,10 @@ void Places::rebuild()
 {
     m_built = true;
     m_places.clear();
+    // First time the sidebar is drawn is when watching starts to matter.
+    startWatchingMounts();
+    startWatchingDevices();
+    m_mountSignature = deviceSignature();
 
     const auto folder = [this](QStandardPaths::StandardLocation location,
                                const QString &glyph) {
@@ -232,6 +327,33 @@ void Places::rebuild()
         place.mounted = true;
         place.ejectable = mount.isRemovable || mount.isNetwork;
         m_places.append(place);
+    }
+
+    // Drives that are plugged in but not mounted. A mounted one is already above, listed
+    // from the mount table, so this only ever adds what that cannot see — which was the
+    // whole complaint: plug a stick in and nothing appeared until some other application
+    // mounted it.
+    if (m_udisks) {
+        const QList<RemovableDevice> devices = m_udisks->devices();
+        for (const RemovableDevice &device : devices) {
+            if (device.mounted && mountedPaths.contains(device.mountPath))
+                continue;
+            if (device.mounted)
+                continue; // mounted somewhere the mount table already described
+
+            Place place;
+            place.kind = Place::Device;
+            place.name = device.name();
+            place.glyph = QStringLiteral("\uF287");
+            // The udisks object, not a path: there is no path until it is mounted.
+            place.target = device.objectPath;
+            // No "not mounted" note: mounting is what clicking it does, so saying so is
+            // an explanation of plumbing rather than something to act on — and it made a
+            // drive that works look like one that does not, since the note is otherwise
+            // where a place says why it cannot be opened.
+            place.ejectable = false;
+            m_places.append(place);
+        }
     }
 
     // SSH hosts, straight out of OpenSSH's own config (§10.1).
@@ -649,6 +771,25 @@ void Places::activate(int row)
     const Place place = m_places.at(row);
     if (!place.available) {
         emit status(place.note.isEmpty() ? QStringLiteral("unavailable") : place.note);
+        return;
+    }
+
+    // An unmounted drive has no path to navigate to yet, so clicking it mounts it first.
+    // udisks does the work and the polkit prompt, exactly as it does for every other file
+    // manager on the desktop (§10.7: omafile never handles a credential itself).
+    if (place.kind == Place::Device) {
+        setBusy(true);
+        QString error;
+        const QString path = m_udisks ? m_udisks->mount(place.target, &error) : QString();
+        setBusy(false);
+
+        if (path.isEmpty()) {
+            emit status(error.isEmpty() ? QStringLiteral("could not mount %1").arg(place.name)
+                                        : error);
+            return;
+        }
+        refresh();
+        emit navigate(path);
         return;
     }
 

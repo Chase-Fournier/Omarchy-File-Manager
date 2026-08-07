@@ -44,6 +44,7 @@ SOURCES += \
     ../src/clipboard.cpp \
     ../src/opener.cpp \
     ../src/places.cpp \
+    ../src/udisks.cpp \
     ../src/searchengine.cpp \
     ../src/operations.cpp \
     ../src/terminal.cpp \
@@ -84,6 +85,7 @@ HEADERS += \
     ../src/clipboard.h \
     ../src/opener.h \
     ../src/places.h \
+    ../src/udisks.h \
     ../src/searchengine.h \
     ../src/operations.h \
     ../src/settings.h \

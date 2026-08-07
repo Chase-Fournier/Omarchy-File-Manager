@@ -391,6 +391,75 @@ empty for the whole operation before jumping to done. `setReadChannel(StandardEr
 the fix. The symptom looked exactly like "progress is not implemented", which is why it
 survived the first screenshot: the overlay was correct and the data never arrived.
 
+### A drive that is plugged in but not mounted
+
+**The mount table cannot answer "what is plugged in".** Watching `/proc/self/mountinfo`
+made a drive appear the moment anything mounted it — but nothing mounts a stick on its
+own, so plugging one in still showed nothing until Nautilus was opened and used to mount
+it. Reported from real use, and the mount watcher was working perfectly the whole time:
+it was answering a different question.
+
+**udisks2 answers the other one, and every desktop already runs it.** `src/udisks.*` is a
+read-and-mount client over the system bus — no formatting, no partitioning, no unlocking,
+because those are `udisksctl`'s job and §1's. An unmounted drive is listed as
+`Place::Device`, drawn exactly like a mounted one; clicking mounts it through udisks,
+which also owns the polkit prompt, and then navigates there. It carries no "not mounted"
+note: mounting is what clicking does, so the label explained plumbing rather than offering
+anything to act on, and the note field is otherwise where a place says why it *cannot* be
+opened — which made a drive that works read like one that does not.
+
+**udisks' own hints do the filtering, which is why the sidebar matches Nautilus.** The
+Ventoy stick on this machine has two partitions: `sda1` (exfat, the data) and `sda2`
+(vfat, the EFI loader). `sda2` carries `HintIgnore=true`, so udisks is saying outright
+that a person should not be shown it — honouring that, plus `HintSystem` and the drive's
+`Removable`, keeps EFI partitions and internal disks out without omafile inventing any
+policy of its own.
+
+**Device is appended to `Place::Kind`, never inserted.** QML compares kinds by number
+(`kind !== 2 && kind !== 3`), so renumbering would silently change what those checks mean.
+
+**The signature has to cover devices, not just mounts.** The settle timer skips the
+rebuild when nothing relevant changed — and a drive being attached changes no mount at
+all, so a mount-only signature would have filtered out the very event this was built for.
+
+**Verified against the real drive by unmounting it.** `udisksctl unmount -b /dev/sda1`
+puts the machine in exactly the state being complained about — attached, not mounted —
+where the sidebar lists `Ventoy` as an ordinary drive. Driving `Places::activate` on that row
+directly (rather than synthesising a click) mounted it and emitted
+`navigate -> /run/media/warforged/Ventoy`, which also put the drive back as it was found.
+
+### Drives appear while the window is open
+
+**The kernel reports a mount-table change; nothing polls for it.** `poll()` on
+`/proc/self/mountinfo` raises `POLLPRI` whenever anything is mounted or unmounted, so a
+`QSocketNotifier` in Exception mode costs a descriptor and nothing else — measured at
+**0 jiffies of CPU over five idle seconds**. Before this, a drive plugged in after the
+window opened simply never appeared: `Places` was a snapshot taken on first use, and F5
+refreshes the *directory*, not the sidebar.
+
+**Drain the file or it is a busy loop.** The condition stays raised until the descriptor
+is read to EOF, so the handler rewinds and reads before doing anything else. Skipping that
+turns the notifier into a spin at 100% of a core — which is why the idle-CPU measurement
+above is the test that matters, not "did the row appear".
+
+**Armed on the first rebuild, which is the first time the sidebar is drawn.** A window
+with the sidebar closed never opens the descriptor, matching the existing rule that the
+sidebar's contents are built on first use rather than at construction.
+
+**A signature guards the rebuild.** Mount tables move constantly on a machine running
+containers, and every rebuild resets the model — throwing away the sidebar's scroll
+position — as well as re-parsing `~/.ssh/config` and re-checking four executables. So the
+settle timer compares the interesting mounts against the last set and returns without
+doing anything when they match.
+
+**Two tests of this were wrong before one was right, and the reason is worth keeping.** A
+tmpfs mounted at `/run/media/…` does not appear, because `isPseudoFs` filters tmpfs
+before the removable check ever runs — correct behaviour, useless simulation. A bind mount
+of `/tmp` inherits tmpfs and fails the same way. What works is binding a directory on the
+real filesystem, which arrives as btrfs and is indistinguishable from a stick. Verified in
+a private user+mount namespace, where mounting needs no privileges and nothing touches the
+real machine.
+
 ### Properties, permissions, links and the trash folder
 
 **The stat runs on the worker, like every other one.** A properties panel is one `lstat`,

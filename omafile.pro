@@ -41,6 +41,7 @@ SOURCES += \
     src/settings.cpp \
     src/terminal.cpp \
     src/theme.cpp \
+    src/udisks.cpp \
     src/thumbnails.cpp \
     src/trash.cpp \
     src/watcher.cpp
@@ -70,6 +71,7 @@ HEADERS += \
     src/settings.h \
     src/terminal.h \
     src/theme.h \
+    src/udisks.h \
     src/thumbnails.h \
     src/trash.h \
     src/watcher.h

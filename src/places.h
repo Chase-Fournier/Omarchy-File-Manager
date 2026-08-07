@@ -4,11 +4,15 @@
 
 #include <QAbstractListModel>
 #include <QProcess>
+#include <QSocketNotifier>
+#include <QTimer>
 
 // One row in the sidebar.
 struct Place
 {
-    enum Kind { Folder, Bookmark, SshHost, RcloneRemote, Volume };
+    // Device is appended, not inserted: QML checks kinds by number and renumbering
+    // would silently change what those checks mean.
+    enum Kind { Folder, Bookmark, SshHost, RcloneRemote, Volume, Device };
 
     Kind kind = Folder;
     QString name;
@@ -88,6 +92,26 @@ signals:
 
 private:
     void rebuild();
+
+    // The kernel reports POLLPRI on /proc/self/mountinfo whenever the mount table
+    // changes, so a drive appearing is an event rather than something to poll for. Set
+    // up on the first rebuild, which is the first time the sidebar is actually shown —
+    // a window with it closed never opens the descriptor.
+    void startWatchingMounts();
+    // udisks answers "what is plugged in", which the mount table cannot: a drive nobody
+    // has mounted appears nowhere in it. Created with the watcher, on first rebuild.
+    void startWatchingDevices();
+    QString deviceSignature() const;
+    // The condition stays raised until the file is read again; leaving it would turn the
+    // notifier into a busy loop.
+    void drainMountInfo();
+
+    int m_mountFd = -1;
+    QSocketNotifier *m_mountNotifier = nullptr;
+    QTimer *m_mountSettle = nullptr;
+    // What the last rebuild saw, so unrelated churn does not reset the model.
+    QString m_mountSignature;
+    class UDisks *m_udisks = nullptr;
     // §14: an unclean exit must not leave a mount behind forever. Anything whose only
     // claimants are dead processes is swept on the next start.
     void sweepOrphanedMounts();
